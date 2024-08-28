@@ -3,13 +3,14 @@ const fs = std.fs;
 const mem = std.mem;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
 
     const argv = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, argv);
     if (argv.len < 2) {
         std.debug.print("Usage: zloc <file or directory>\n", .{});
         return;
@@ -23,6 +24,10 @@ pub fn main() !void {
         const dir = fs.cwd().openDir(argv[1], .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound => {
                 std.debug.print("Cannot find {s}: No such file or directory\n", .{argv[1]});
+                return;
+            },
+            error.NotDir => {
+                std.debug.print("{s}\n", .{argv[1]});
                 return;
             },
             else => return err,
