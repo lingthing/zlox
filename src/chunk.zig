@@ -1,7 +1,7 @@
 const std = @import("std");
 const zloc = @import("zloc.zig");
-pub const OpCode = zloc.OpCode;
-pub const Value = zloc.Value;
+const OpCode = zloc.OpCode;
+const Value = zloc.Value;
 
 pub const Chunk = struct {
     code: std.ArrayList(u8),
@@ -22,18 +22,8 @@ pub const Chunk = struct {
         self.constants.deinit();
     }
 
-    pub fn write(self: *Chunk, byte: anytype, line: u32) void {
-        const byteType = @TypeOf(byte);
-        if (byteType != u8 and byteType != OpCode) {
-            @compileError(std.fmt.comptimePrint("Chunk.write() only accepts u8 or OpCode. Your type is {s}", .{@typeName(byteType)}));
-        }
-
-        if (byteType == u8) {
-            self.code.append(byte) catch @panic("OOM");
-        } else {
-            self.code.append(@intFromEnum(byte)) catch @panic("OOM");
-        }
-
+    pub fn write(self: *Chunk, byte: u8, line: u32) void {
+        self.code.append(byte) catch @panic("OOM");
         self.lines.append(line) catch @panic("OOM");
     }
 

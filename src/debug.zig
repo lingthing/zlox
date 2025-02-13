@@ -18,12 +18,12 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     stdout.print("{:0>4} ", .{offset}) catch unreachable;
 
     if (offset > 0 and chunk.lines.items[offset] == chunk.lines.items[offset - 1]) {
-        stdout.print("   | ", .{}) catch unreachable;
+        stdout.print("{c:>4} ", .{'|'}) catch unreachable;
     } else {
         stdout.print("{:>4} ", .{chunk.lines.items[offset]}) catch unreachable;
     }
 
-    const instruction: OpCode = @enumFromInt(chunk.get(offset));
+    const instruction = OpCode.from(chunk.get(offset));
     switch (instruction) {
         .op_constant => {
             return constantInstruction(instruction.toString(), chunk, offset);
