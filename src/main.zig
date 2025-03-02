@@ -7,48 +7,109 @@ const zloc = @import("zloc.zig");
 const Chunk = zloc.Chunk;
 const OpCode = zloc.OpCode;
 const VM = zloc.VM;
+const gpa = @import("common_allocator.zig").gpa;
 
-pub fn main() !void {
-    var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa_instance.deinit();
-    const gpa = gpa_instance.allocator();
+fn repl() void {
+    var buf: [1024]u8 = undefined;
+    const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
+    const stderr = std.io.getStdErr().writer();
 
     var vm = VM.init(gpa);
     defer vm.deinit();
 
-    var chunk = Chunk.init(gpa);
-    defer chunk.deinit();
+    while (true) {
+        stdout.print("> ", .{}) catch unreachable;
 
-    var constant: u8 = @intCast(chunk.addConstant(4));
-    chunk.write(OpCode.op_constant.u8(), 12);
-    chunk.write(constant, 12);
+        var line = stdin.readUntilDelimiter(&buf, '\n') catch |err| switch (err) {
+            error.StreamTooLong => {
+                stderr.print("Line too long\n", .{}) catch unreachable;
+                continue;
+            },
+            error.EndOfStream => {
+                break;
+            },
+            else => {
+                stderr.print("Unexpected error: {!}\n", .{err}) catch unreachable;
+                std.process.exit(1);
+            },
+        };
 
-    constant = @intCast(chunk.addConstant(8));
-    chunk.write(OpCode.op_constant.u8(), 12);
-    chunk.write(constant, 12);
-    chunk.write(OpCode.op_add.u8(), 12);
+        if (line.len > 1 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+        if (line.len == 0) continue;
 
-    constant = @intCast(chunk.addConstant(2));
-    chunk.write(OpCode.op_constant.u8(), 12);
-    chunk.write(constant, 12);
-    chunk.write(OpCode.op_divide.u8(), 12);
+        if (mem.eql(u8, line, "exit")) {
+            break;
+        } else if (mem.eql(u8, line, "clear")) {
+            stdout.print("\x1b[H\x1b[2J", .{}) catch unreachable;
+            continue;
+        }
 
-    chunk.write(OpCode.op_negate.u8(), 12);
-    chunk.write(OpCode.op_return.u8(), 12);
-    debug.disassembleChunk(&chunk, "main");
+        _ = vm.interpret(line);
+    }
+}
 
-    _ = vm.interpret(&chunk);
+fn runFile(path: []const u8) void {
+    const source = readFile(path);
+    defer gpa.free(source);
 
-    // const argv = try std.process.argsAlloc(gpa);
-    // defer std.process.argsFree(gpa, argv);
-    // if (argv.len < 2) {
-    //     std.debug.print("Usage: zloc <file>\n", .{});
-    //     return;
-    // }
+    var vm = VM.init(gpa);
+    defer vm.deinit();
+    switch (vm.interpret(source)) {
+        .ok => {},
+        .compile_error => {
+            std.process.exit(65);
+        },
+        .runtime_error => {
+            std.process.exit(70);
+        },
+    }
+}
 
-    // if (mem.eql(u8, argv[1], "--help")) {
-    //     std.debug.print("Usage: zloc <file>\n", .{});
-    // } else if (mem.eql(u8, argv[1], "--version")) {
-    //     std.debug.print("{s}\n", .{version.VERSION});
-    // } else {}
+fn readFile(path: []const u8) []u8 {
+    const stderr = std.io.getStdErr().writer();
+
+    var file = fs.cwd().openFile(path, .{ .mode = .read_only }) catch {
+        stderr.print("Could not open file \"{s}\".\n", .{path}) catch unreachable;
+        std.process.exit(74);
+    };
+    defer file.close();
+
+    file.seekFromEnd(0) catch unreachable;
+    const filesize = file.getEndPos() catch unreachable;
+
+    const buf = gpa.alloc(u8, filesize) catch {
+        stderr.print("Not enough memory to read \"{s}\".\n", .{path}) catch unreachable;
+        std.process.exit(74);
+    };
+    _ = file.readAll(buf) catch {
+        stderr.print("Could not read file \"{s}\".\n", .{path}) catch unreachable;
+        std.process.exit(74);
+    };
+
+    return buf;
+}
+
+pub fn main() !void {
+    defer @import("common_allocator.zig").deinit();
+
+    const argv = try std.process.argsAlloc(gpa);
+    const argc = argv.len;
+    defer std.process.argsFree(gpa, argv);
+
+    const stdout = std.io.getStdOut().writer();
+    const stderr = std.io.getStdErr().writer();
+    if (argc == 1) {
+        repl();
+    } else if (argc == 2) {
+        if (mem.eql(u8, argv[1], "--help")) {
+            stdout.print("Usage: zloc <file>\n", .{}) catch unreachable;
+        } else if (mem.eql(u8, argv[1], "--version")) {
+            stdout.print("{s}\n", .{version.VERSION}) catch unreachable;
+        } else {
+            runFile(argv[1]);
+        }
+    } else {
+        stderr.print("Usage: zloc <file>\n", .{}) catch unreachable;
+    }
 }

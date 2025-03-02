@@ -3,6 +3,7 @@ const zloc = @import("zloc.zig");
 const Chunk = zloc.Chunk;
 const Value = zloc.Value;
 const OpCode = zloc.OpCode;
+const Compiler = zloc.Compiler;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
 
@@ -34,11 +35,12 @@ pub const VM = struct {
         self.gpa.free(self.stack);
     }
 
-    pub fn interpret(vm: *VM, chunk: *Chunk) InterpretResult {
-        vm.chunk = chunk;
-        vm.ip = chunk.code.items.ptr;
+    pub fn interpret(vm: *VM, source: []const u8) InterpretResult {
+        _ = vm;
+        var compiler = Compiler.init();
+        compiler.compile(source);
 
-        return vm.run();
+        return .ok;
     }
 
     fn resetStack(vm: *VM) void {
