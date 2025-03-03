@@ -95,10 +95,27 @@ pub const Compiler = struct {
         compiler.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
         switch (operatorType) {
+            .token_bang_equal => compiler.emitBytes(OpCode.op_equal.u8(), OpCode.op_not.u8()),
+            .token_equal_equal => compiler.emitByte(OpCode.op_equal.u8()),
+            .token_greater => compiler.emitByte(OpCode.op_greater.u8()),
+            .token_greater_equal => compiler.emitBytes(OpCode.op_less.u8(), OpCode.op_not.u8()),
+            .token_less => compiler.emitByte(OpCode.op_less.u8()),
+            .token_less_equal => compiler.emitBytes(OpCode.op_greater.u8(), OpCode.op_not.u8()),
+
             .token_plus => compiler.emitByte(OpCode.op_add.u8()),
             .token_minus => compiler.emitByte(OpCode.op_subtract.u8()),
             .token_star => compiler.emitByte(OpCode.op_multiply.u8()),
             .token_slash => compiler.emitByte(OpCode.op_divide.u8()),
+
+            else => unreachable,
+        }
+    }
+
+    fn literal(compiler: *Compiler) void {
+        switch (compiler.parser.previous.type) {
+            .token_nil => compiler.emitByte(OpCode.op_nil.u8()),
+            .token_true => compiler.emitByte(OpCode.op_true.u8()),
+            .token_false => compiler.emitByte(OpCode.op_false.u8()),
 
             else => unreachable,
         }
@@ -114,7 +131,7 @@ pub const Compiler = struct {
             f64,
             compiler.parser.previous.start[0..compiler.parser.previous.length],
         ) catch unreachable;
-        compiler.emitConstant(value);
+        compiler.emitConstant(Value.initNumber(value));
     }
 
     fn unary(compiler: *Compiler) void {
@@ -123,6 +140,7 @@ pub const Compiler = struct {
         compiler.parsePrecedence(.prec_unary);
 
         switch (operatorType) {
+            .token_bang => compiler.emitByte(OpCode.op_not.u8()),
             .token_minus => compiler.emitByte(OpCode.op_negate.u8()),
 
             else => unreachable,
@@ -264,14 +282,14 @@ const rules = blk: {
         .precedence = .prec_factor,
     };
     tmp[TokenType.token_bang.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.unary,
         .infix = null,
         .precedence = .prec_none,
     };
     tmp[TokenType.token_bang_equal.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.binary,
+        .precedence = .prec_equality,
     };
     tmp[TokenType.token_equal.u8()] = .{
         .prefix = null,
@@ -280,28 +298,28 @@ const rules = blk: {
     };
     tmp[TokenType.token_equal_equal.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.binary,
+        .precedence = .prec_comparison,
     };
     tmp[TokenType.token_greater.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.binary,
+        .precedence = .prec_comparison,
     };
     tmp[TokenType.token_greater_equal.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.binary,
+        .precedence = .prec_comparison,
     };
     tmp[TokenType.token_less.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.binary,
+        .precedence = .prec_comparison,
     };
     tmp[TokenType.token_less_equal.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.binary,
+        .precedence = .prec_comparison,
     };
 
     tmp[TokenType.token_identifier.u8()] = .{
@@ -336,7 +354,7 @@ const rules = blk: {
         .precedence = .prec_none,
     };
     tmp[TokenType.token_false.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.literal,
         .infix = null,
         .precedence = .prec_none,
     };
@@ -356,7 +374,7 @@ const rules = blk: {
         .precedence = .prec_none,
     };
     tmp[TokenType.token_nil.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.literal,
         .infix = null,
         .precedence = .prec_none,
     };
@@ -386,7 +404,7 @@ const rules = blk: {
         .precedence = .prec_none,
     };
     tmp[TokenType.token_true.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.literal,
         .infix = null,
         .precedence = .prec_none,
     };

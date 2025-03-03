@@ -54,6 +54,17 @@ pub const VM = struct {
         vm.stackTop = vm.stack.ptr;
     }
 
+    fn runtimeError(vm: *VM, comptime fmt: []const u8, args: anytype) void {
+        const stderr = utils.getStderrWriter();
+        stderr.print(fmt, args) catch unreachable;
+        stderr.print("\n", .{}) catch unreachable;
+
+        const instruction = @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr) - 1;
+        const line = vm.chunk.lines.items[instruction];
+        stderr.print("[line {d}] in script\n", .{line}) catch unreachable;
+        vm.resetStack();
+    }
+
     fn readByte(vm: *VM) u8 {
         const byte = vm.ip[0];
         vm.ip += 1;
@@ -74,6 +85,10 @@ pub const VM = struct {
         vm.stackTop -= 1;
 
         return vm.stackTop[0];
+    }
+
+    fn peek(vm: *VM, distance: usize) Value {
+        return (vm.stackTop - 1 - distance)[0];
     }
 
     fn top(vm: *VM) *Value {
@@ -101,29 +116,91 @@ pub const VM = struct {
                     const constant = vm.readConstant();
                     vm.push(constant);
                 },
-                .op_add => {
+                .op_nil => {
+                    vm.push(Value.initNil());
+                },
+                .op_true => {
+                    vm.push(Value.initBool(true));
+                },
+                .op_false => {
+                    vm.push(Value.initBool(false));
+                },
+                .op_equal => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    vm.push(a + b);
+                    vm.push(Value.initBool(Value.eql(a, b)));
+                },
+                .op_greater => {
+                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
+                        vm.runtimeError("Operands must be numbers.", .{});
+                        return .runtime_error;
+                    }
+
+                    const b = vm.pop().asNumber();
+                    const a = vm.pop().asNumber();
+                    vm.push(Value.initBool(a > b));
+                },
+                .op_less => {
+                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
+                        vm.runtimeError("Operands must be numbers.", .{});
+                        return .runtime_error;
+                    }
+
+                    const b = vm.pop().asNumber();
+                    const a = vm.pop().asNumber();
+                    vm.push(Value.initBool(a < b));
+                },
+                .op_add => {
+                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
+                        vm.runtimeError("Operands must be numbers.", .{});
+                        return .runtime_error;
+                    }
+
+                    const b = vm.pop().asNumber();
+                    const a = vm.pop().asNumber();
+                    vm.push(Value.initNumber(a + b));
                 },
                 .op_subtract => {
-                    const b = vm.pop();
-                    const a = vm.pop();
-                    vm.push(a - b);
+                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
+                        vm.runtimeError("Operands must be numbers.", .{});
+                        return .runtime_error;
+                    }
+
+                    const b = vm.pop().asNumber();
+                    const a = vm.pop().asNumber();
+                    vm.push(Value.initNumber(a - b));
                 },
                 .op_multiply => {
-                    const b = vm.pop();
-                    const a = vm.pop();
-                    vm.push(a * b);
+                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
+                        vm.runtimeError("Operands must be numbers.", .{});
+                        return .runtime_error;
+                    }
+
+                    const b = vm.pop().asNumber();
+                    const a = vm.pop().asNumber();
+                    vm.push(Value.initNumber(a * b));
                 },
                 .op_divide => {
-                    const b = vm.pop();
-                    const a = vm.pop();
-                    vm.push(a / b);
+                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
+                        vm.runtimeError("Operands must be numbers.", .{});
+                        return .runtime_error;
+                    }
+
+                    const b = vm.pop().asNumber();
+                    const a = vm.pop().asNumber();
+                    vm.push(Value.initNumber(a / b));
+                },
+                .op_not => {
+                    vm.push(Value.initBool(isFalsey(vm.pop())));
                 },
                 .op_negate => {
+                    if (!vm.peek(0).isNumber()) {
+                        vm.runtimeError("Operand must be a number.", .{});
+                        return .runtime_error;
+                    }
+
                     // naive way
-                    vm.push(-vm.pop());
+                    vm.push(Value.initNumber(-vm.pop().asNumber()));
 
                     // smart way
                     // const ptr = vm.top();
@@ -138,3 +215,11 @@ pub const VM = struct {
         }
     }
 };
+
+fn isFalsey(value: Value) bool {
+    return switch (value.type) {
+        .val_nil => true,
+        .val_bool => !value.asBool(),
+        else => false,
+    };
+}

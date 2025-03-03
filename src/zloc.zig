@@ -12,5 +12,9 @@ pub const TokenType = @import("scanner.zig").TokenType;
 
 pub fn printValue(value: Value) void {
     const stdout = utils.getStdoutWriter();
-    stdout.print("{d}", .{value}) catch unreachable;
+    switch (value.type) {
+        .val_bool => stdout.print("{}", .{value.asBool()}) catch unreachable,
+        .val_nil => stdout.print("nil", .{}) catch unreachable,
+        .val_number => stdout.print("{d}", .{value.asNumber()}) catch unreachable,
+    }
 }
