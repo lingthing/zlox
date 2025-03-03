@@ -4,6 +4,7 @@ const zloc = @import("zloc.zig");
 const Chunk = zloc.Chunk;
 const OpCode = zloc.OpCode;
 
+pub const DEBUG_PRINT_CODE = true and builtin.mode == .Debug;
 pub const DEBUG_TRACE_EXECUTION = true and builtin.mode == .Debug;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {

@@ -36,11 +36,18 @@ pub const VM = struct {
     }
 
     pub fn interpret(vm: *VM, source: []const u8) InterpretResult {
-        _ = vm;
-        var compiler = Compiler.init();
-        compiler.compile(source);
+        var chunk = Chunk.init(vm.gpa);
+        defer chunk.deinit();
 
-        return .ok;
+        var compiler = Compiler.init();
+        if (!compiler.compile(source, &chunk)) {
+            return .compile_error;
+        }
+
+        vm.chunk = &chunk;
+        vm.ip = chunk.code.items.ptr;
+
+        return vm.run();
     }
 
     fn resetStack(vm: *VM) void {

@@ -7,8 +7,10 @@ pub const Chunk = @import("chunk.zig").Chunk;
 pub const VM = @import("vm.zig").VM;
 pub const Compiler = @import("compiler.zig").Compiler;
 pub const Scanner = @import("scanner.zig").Scanner;
+pub const Token = @import("scanner.zig").Token;
+pub const TokenType = @import("scanner.zig").TokenType;
 
 pub fn printValue(value: Value) void {
     const stdout = utils.getStdoutWriter();
-    stdout.print("{any}", .{value}) catch unreachable;
+    stdout.print("{d}", .{value}) catch unreachable;
 }
