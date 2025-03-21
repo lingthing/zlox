@@ -4,6 +4,7 @@ const Chunk = zloc.Chunk;
 const Value = zloc.Value;
 const OpCode = zloc.OpCode;
 const Compiler = zloc.Compiler;
+const Obj = zloc.Obj;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
 
@@ -20,7 +21,8 @@ pub const VM = struct {
     chunk: *Chunk,
     ip: [*]u8,
     stack: []Value,
-    stackTop: [*]Value,
+    stack_top: [*]Value,
+    objects: ?*Obj,
 
     pub fn init(gpa: std.mem.Allocator) VM {
         var vm: VM = undefined;
@@ -28,18 +30,32 @@ pub const VM = struct {
         vm.stack = gpa.alloc(Value, STACK_SIZE) catch unreachable;
         vm.resetStack();
 
+        vm.objects = null;
+
         return vm;
     }
 
-    pub fn deinit(self: *VM) void {
-        self.gpa.free(self.stack);
+    pub fn deinit(vm: *VM) void {
+        vm.freeObjects();
+        vm.gpa.free(vm.stack);
+    }
+
+    fn freeObjects(vm: *VM) void {
+        var object = vm.objects;
+        while (object != null) {
+            const next = object.?.next;
+            zloc.freeObject(vm, object.?);
+            object = next;
+        }
+
+        vm.objects = null;
     }
 
     pub fn interpret(vm: *VM, source: []const u8) InterpretResult {
         var chunk = Chunk.init(vm.gpa);
         defer chunk.deinit();
 
-        var compiler = Compiler.init();
+        var compiler = Compiler.init(vm);
         if (!compiler.compile(source, &chunk)) {
             return .compile_error;
         }
@@ -51,7 +67,7 @@ pub const VM = struct {
     }
 
     fn resetStack(vm: *VM) void {
-        vm.stackTop = vm.stack.ptr;
+        vm.stack_top = vm.stack.ptr;
     }
 
     fn runtimeError(vm: *VM, comptime fmt: []const u8, args: anytype) void {
@@ -77,22 +93,22 @@ pub const VM = struct {
     }
 
     fn push(vm: *VM, value: Value) void {
-        vm.stackTop[0] = value;
-        vm.stackTop += 1;
+        vm.stack_top[0] = value;
+        vm.stack_top += 1;
     }
 
     fn pop(vm: *VM) Value {
-        vm.stackTop -= 1;
+        vm.stack_top -= 1;
 
-        return vm.stackTop[0];
+        return vm.stack_top[0];
     }
 
     fn peek(vm: *VM, distance: usize) Value {
-        return (vm.stackTop - 1 - distance)[0];
+        return (vm.stack_top - 1 - distance)[0];
     }
 
     fn top(vm: *VM) *Value {
-        return @ptrCast(vm.stackTop - 1);
+        return @ptrCast(vm.stack_top - 1);
     }
 
     fn run(vm: *VM) InterpretResult {
@@ -101,7 +117,7 @@ pub const VM = struct {
             if (debug.DEBUG_TRACE_EXECUTION) {
                 stdout.print("          ", .{}) catch unreachable;
                 var slot = vm.stack.ptr;
-                while (slot != vm.stackTop) : (slot += 1) {
+                while (slot != vm.stack_top) : (slot += 1) {
                     stdout.print("[ ", .{}) catch unreachable;
                     zloc.printValue(slot[0]);
                     stdout.print(" ]", .{}) catch unreachable;
@@ -151,14 +167,26 @@ pub const VM = struct {
                     vm.push(Value.initBool(a < b));
                 },
                 .op_add => {
-                    if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
-                        vm.runtimeError("Operands must be numbers.", .{});
+                    if (vm.peek(0).isString() and vm.peek(1).isString()) {
+                        const b = vm.pop().asRawString();
+                        const a = vm.pop().asRawString();
+
+                        const length = a.len + b.len;
+                        var chars = vm.gpa.alloc(u8, length) catch {
+                            // TODO: handle memory not enough
+                            unreachable;
+                        };
+                        std.mem.copyForwards(u8, chars[0..a.len], a);
+                        std.mem.copyForwards(u8, chars[a.len..], b);
+                        vm.push(Value.initObj(zloc.takeString(vm, chars).?));
+                    } else if (vm.peek(0).isNumber() and vm.peek(1).isNumber()) {
+                        const b = vm.pop().asNumber();
+                        const a = vm.pop().asNumber();
+                        vm.push(Value.initNumber(a + b));
+                    } else {
+                        vm.runtimeError("Operands must be two numbers or two strings.", .{});
                         return .runtime_error;
                     }
-
-                    const b = vm.pop().asNumber();
-                    const a = vm.pop().asNumber();
-                    vm.push(Value.initNumber(a + b));
                 },
                 .op_subtract => {
                     if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {

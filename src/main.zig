@@ -35,7 +35,7 @@ fn repl() void {
             },
         };
 
-        if (line.len > 1 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
         if (line.len == 0) continue;
 
         if (mem.eql(u8, line, "exit")) {

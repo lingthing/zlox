@@ -2,6 +2,7 @@ const std = @import("std");
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
 const zloc = @import("zloc.zig");
+const VM = zloc.VM;
 const Scanner = zloc.Scanner;
 const Token = zloc.Token;
 const TokenType = zloc.TokenType;
@@ -10,26 +11,33 @@ const OpCode = zloc.OpCode;
 const Value = zloc.Value;
 
 pub const Compiler = struct {
+    vm: *VM,
     scanner: Scanner,
     parser: Parser,
-    compilingChunk: *Chunk,
+    compiling_chunk: *Chunk,
 
-    pub fn init() Compiler {
-        return undefined;
+    pub fn init(vm: *VM) Compiler {
+        const compiler = Compiler{
+            .vm = vm,
+            .scanner = undefined,
+            .parser = undefined,
+            .compiling_chunk = undefined,
+        };
+        return compiler;
     }
 
     pub fn compile(compiler: *Compiler, source: []const u8, chunk: *Chunk) bool {
         compiler.scanner = Scanner.init(source);
-        compiler.compilingChunk = chunk;
-        compiler.parser.hadError = false;
-        compiler.parser.panicMode = false;
+        compiler.compiling_chunk = chunk;
+        compiler.parser.had_error = false;
+        compiler.parser.panic_mode = false;
 
         compiler.advance();
         compiler.expression();
         compiler.consume(.token_eof, "Expect end of expression.");
         compiler.endCompiler();
 
-        return !compiler.parser.hadError;
+        return !compiler.parser.had_error;
     }
 
     fn advance(compiler: *Compiler) void {
@@ -43,8 +51,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn consume(compiler: *Compiler, tokenType: TokenType, message: []const u8) void {
-        if (compiler.parser.current.type == tokenType) {
+    fn consume(compiler: *Compiler, token_type: TokenType, message: []const u8) void {
+        if (compiler.parser.current.type == token_type) {
             compiler.advance();
             return;
         }
@@ -83,7 +91,7 @@ pub const Compiler = struct {
         compiler.emitReturn();
 
         if (debug.DEBUG_PRINT_CODE) {
-            if (!compiler.parser.hadError) {
+            if (!compiler.parser.had_error) {
                 debug.disassembleChunk(compiler.currentChunk(), "code");
             }
         }
@@ -134,6 +142,14 @@ pub const Compiler = struct {
         compiler.emitConstant(Value.initNumber(value));
     }
 
+    fn string(compiler: *Compiler) void {
+        const value = zloc.copyString(
+            compiler.vm,
+            compiler.parser.previous.start[1 .. compiler.parser.previous.length - 1],
+        );
+        compiler.emitConstant(Value.initObj(value.?));
+    }
+
     fn unary(compiler: *Compiler) void {
         const operatorType = compiler.parser.previous.type;
 
@@ -167,7 +183,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(compiler: *Compiler) *Chunk {
-        return compiler.compilingChunk;
+        return compiler.compiling_chunk;
     }
 
     fn errorAt(compiler: *Compiler, token: *Token, message: []const u8) void {
@@ -183,7 +199,7 @@ pub const Compiler = struct {
         }
 
         stderr.print(": {s}\n", .{message}) catch unreachable;
-        compiler.parser.hadError = true;
+        compiler.parser.had_error = true;
     }
 
     fn @"error"(compiler: *Compiler, message: []const u8) void {
@@ -198,8 +214,8 @@ pub const Compiler = struct {
 const Parser = struct {
     current: Token,
     previous: Token,
-    hadError: bool,
-    panicMode: bool,
+    had_error: bool,
+    panic_mode: bool,
 };
 
 const Precedence = enum {
@@ -328,7 +344,7 @@ const rules = blk: {
         .precedence = .prec_none,
     };
     tmp[TokenType.token_string.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.string,
         .infix = null,
         .precedence = .prec_none,
     };
@@ -432,6 +448,6 @@ const rules = blk: {
     break :blk tmp;
 };
 
-fn getRule(tokenType: TokenType) *const ParseRule {
-    return &rules[tokenType.u8()];
+fn getRule(token_type: TokenType) *const ParseRule {
+    return &rules[token_type.u8()];
 }

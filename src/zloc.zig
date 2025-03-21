@@ -9,6 +9,16 @@ pub const Compiler = @import("compiler.zig").Compiler;
 pub const Scanner = @import("scanner.zig").Scanner;
 pub const Token = @import("scanner.zig").Token;
 pub const TokenType = @import("scanner.zig").TokenType;
+pub const ObjType = @import("object.zig").ObjType;
+pub const Obj = @import("object.zig").Obj;
+pub const ObjString = @import("object.zig").ObjString;
+
+pub const printObject = @import("object.zig").printObject;
+pub const copyString = @import("object.zig").copyString;
+pub const takeString = @import("object.zig").takeString;
+pub const allocateObject = @import("object.zig").allocateObject;
+pub const allocateString = @import("object.zig").allocateString;
+pub const freeObject = @import("object.zig").freeObject;
 
 pub fn printValue(value: Value) void {
     const stdout = utils.getStdoutWriter();
@@ -16,5 +26,6 @@ pub fn printValue(value: Value) void {
         .val_bool => stdout.print("{}", .{value.asBool()}) catch unreachable,
         .val_nil => stdout.print("nil", .{}) catch unreachable,
         .val_number => stdout.print("{d}", .{value.asNumber()}) catch unreachable,
+        .val_obj => printObject(value),
     }
 }

@@ -42,9 +42,9 @@ pub const Scanner = struct {
         return true;
     }
 
-    fn makeToken(scanner: *Scanner, tokenType: TokenType) Token {
+    fn makeToken(scanner: *Scanner, token_type: TokenType) Token {
         return .{
-            .type = tokenType,
+            .type = token_type,
             .start = scanner.start,
             .length = @intCast(@intFromPtr(scanner.current) - @intFromPtr(scanner.start)),
             .line = scanner.line,
@@ -113,11 +113,11 @@ pub const Scanner = struct {
         return scanner.makeToken(.token_number);
     }
 
-    fn checkKeyword(scanner: *Scanner, start: u32, rest: []const u8, tokenType: TokenType) TokenType {
+    fn checkKeyword(scanner: *Scanner, start: u32, rest: []const u8, token_type: TokenType) TokenType {
         if (@intFromPtr(scanner.current) - @intFromPtr(scanner.start) == start + rest.len and
             mem.eql(u8, scanner.start[start..][0..rest.len], rest))
         {
-            return tokenType;
+            return token_type;
         }
         return .token_identifier;
     }
