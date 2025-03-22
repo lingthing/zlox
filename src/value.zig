@@ -107,12 +107,7 @@ pub const Value = struct {
             .val_bool => return a.asBool() == b.asBool(),
             .val_nil => return true,
             .val_number => return a.asNumber() == b.asNumber(),
-            .val_obj => {
-                const astring = a.asRawString();
-                const bstring = b.asRawString();
-                return astring.len == bstring.len and
-                    std.mem.eql(u8, astring, bstring);
-            },
+            .val_obj => return a.asObj() == b.asObj(),
         }
     }
 };

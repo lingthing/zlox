@@ -5,6 +5,7 @@ const Value = zloc.Value;
 const OpCode = zloc.OpCode;
 const Compiler = zloc.Compiler;
 const Obj = zloc.Obj;
+const Table = zloc.Table;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
 
@@ -22,6 +23,7 @@ pub const VM = struct {
     ip: [*]u8,
     stack: []Value,
     stack_top: [*]Value,
+    strings: Table,
     objects: ?*Obj,
 
     pub fn init(gpa: std.mem.Allocator) VM {
@@ -31,11 +33,13 @@ pub const VM = struct {
         vm.resetStack();
 
         vm.objects = null;
+        vm.strings = Table.init();
 
         return vm;
     }
 
     pub fn deinit(vm: *VM) void {
+        vm.strings.deinit();
         vm.freeObjects();
         vm.gpa.free(vm.stack);
     }

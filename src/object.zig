@@ -14,6 +14,7 @@ pub const Obj = struct {
 pub const ObjString = struct {
     obj: Obj,
     chars: []u8,
+    hash: u32,
 
     pub fn asObj(self: *ObjString) *Obj {
         return @as(*Obj, @ptrCast(self));
@@ -21,13 +22,27 @@ pub const ObjString = struct {
 };
 
 pub fn copyString(vm: *VM, chars: []const u8) ?*ObjString {
+    const hash = hashString(chars);
+    const interned = vm.strings.findString(chars, hash);
+    if (interned != null) {
+        return interned;
+    }
+
     const new_chars = vm.gpa.dupe(u8, chars) catch return null;
 
-    return allocateString(vm, new_chars);
+    return allocateString(vm, new_chars, hash);
 }
 
 pub fn takeString(vm: *VM, chars: []const u8) ?*ObjString {
-    return allocateString(vm, chars);
+    const hash = hashString(chars);
+    const interned = vm.strings.findString(chars, hash);
+    if (interned != null) {
+        vm.gpa.free(chars);
+
+        return interned;
+    }
+
+    return allocateString(vm, chars, hash);
 }
 
 pub fn printObject(value: Value) void {
@@ -56,10 +71,13 @@ pub fn allocateObject(vm: *VM, obj_type: ObjType) ?*Obj {
     return object;
 }
 
-pub fn allocateString(vm: *VM, chars: []const u8) ?*ObjString {
+pub fn allocateString(vm: *VM, chars: []const u8, hash: u32) ?*ObjString {
     var object = allocateObject(vm, .obj_string) orelse return null;
     var string = object.asString();
     string.chars = @constCast(chars);
+    string.hash = hash;
+
+    _ = vm.strings.set(string, Value.initNil());
 
     return string;
 }
@@ -72,6 +90,16 @@ pub fn freeObject(vm: *VM, obj: *Obj) void {
             vm.gpa.destroy(string);
         },
     }
+}
+
+fn hashString(keys: []const u8) u32 {
+    var hash: u32 = 2166136261;
+    for (keys) |c| {
+        hash ^= c;
+        hash = @as(u32, @truncate(@as(u64, hash) * 16777619));
+    }
+
+    return hash;
 }
 
 const std = @import("std");

@@ -12,6 +12,7 @@ pub const TokenType = @import("scanner.zig").TokenType;
 pub const ObjType = @import("object.zig").ObjType;
 pub const Obj = @import("object.zig").Obj;
 pub const ObjString = @import("object.zig").ObjString;
+pub const Table = @import("table.zig").Table;
 
 pub const printObject = @import("object.zig").printObject;
 pub const copyString = @import("object.zig").copyString;
