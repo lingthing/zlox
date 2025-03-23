@@ -5,6 +5,7 @@ const Value = zloc.Value;
 const OpCode = zloc.OpCode;
 const Compiler = zloc.Compiler;
 const Obj = zloc.Obj;
+const ObjString = zloc.ObjString;
 const Table = zloc.Table;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
@@ -23,6 +24,7 @@ pub const VM = struct {
     ip: [*]u8,
     stack: []Value,
     stack_top: [*]Value,
+    globals: Table,
     strings: Table,
     objects: ?*Obj,
 
@@ -33,12 +35,14 @@ pub const VM = struct {
         vm.resetStack();
 
         vm.objects = null;
+        vm.globals = Table.init();
         vm.strings = Table.init();
 
         return vm;
     }
 
     pub fn deinit(vm: *VM) void {
+        vm.globals.deinit();
         vm.strings.deinit();
         vm.freeObjects();
         vm.gpa.free(vm.stack);
@@ -96,6 +100,10 @@ pub const VM = struct {
         return vm.chunk.constants.items[vm.readByte()];
     }
 
+    fn readString(vm: *VM) *ObjString {
+        return vm.readConstant().asString();
+    }
+
     fn push(vm: *VM, value: Value) void {
         vm.stack_top[0] = value;
         vm.stack_top += 1;
@@ -144,6 +152,33 @@ pub const VM = struct {
                 },
                 .op_false => {
                     vm.push(Value.initBool(false));
+                },
+                .op_pop => {
+                    _ = vm.pop();
+                },
+                .op_get_global => {
+                    const name = vm.readString();
+                    var value: Value = undefined;
+                    if (!vm.globals.get(name, &value)) {
+                        vm.runtimeError("Undefined variable '{s}'.", .{name.chars});
+
+                        return .runtime_error;
+                    }
+                    vm.push(value);
+                },
+                .op_define_global => {
+                    const name = vm.readString();
+                    _ = vm.globals.set(name, vm.peek(0));
+                    _ = vm.pop();
+                },
+                .op_set_global => {
+                    const name = vm.readString();
+                    if (vm.globals.set(name, vm.peek(0))) {
+                        _ = vm.globals.delete(name);
+                        vm.runtimeError("Undefined variable '{s}'.", .{name.chars});
+
+                        return .runtime_error;
+                    }
                 },
                 .op_equal => {
                     const b = vm.pop();
@@ -238,9 +273,11 @@ pub const VM = struct {
                     // const ptr = vm.top();
                     // ptr.* = -ptr.*;
                 },
-                .op_return => {
+                .op_print => {
                     zloc.printValue(vm.pop());
                     stdout.print("\n", .{}) catch unreachable;
+                },
+                .op_return => {
                     return .ok;
                 },
             }

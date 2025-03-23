@@ -33,8 +33,9 @@ pub const Compiler = struct {
         compiler.parser.panic_mode = false;
 
         compiler.advance();
-        compiler.expression();
-        compiler.consume(.token_eof, "Expect end of expression.");
+        while (!compiler.match(.token_eof)) {
+            compiler.declaration();
+        }
         compiler.endCompiler();
 
         return !compiler.parser.had_error;
@@ -58,6 +59,17 @@ pub const Compiler = struct {
         }
 
         compiler.errorAtCurrent(message);
+    }
+
+    fn check(compiler: *Compiler, token_type: TokenType) bool {
+        return compiler.parser.current.type == token_type;
+    }
+
+    fn match(compiler: *Compiler, token_type: TokenType) bool {
+        if (!compiler.check(token_type)) return false;
+        compiler.advance();
+
+        return true;
     }
 
     fn emitByte(compiler: *Compiler, byte: u8) void {
@@ -97,7 +109,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(compiler: *Compiler) void {
+    fn binary(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
         const operatorType = compiler.parser.previous.type;
         const rule = getRule(operatorType);
         compiler.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
@@ -119,7 +132,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn literal(compiler: *Compiler) void {
+    fn literal(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
         switch (compiler.parser.previous.type) {
             .token_nil => compiler.emitByte(OpCode.op_nil.u8()),
             .token_true => compiler.emitByte(OpCode.op_true.u8()),
@@ -129,12 +143,14 @@ pub const Compiler = struct {
         }
     }
 
-    fn grouping(compiler: *Compiler) void {
+    fn grouping(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
         compiler.expression();
         compiler.consume(.token_right_paren, "Expect ')' after expression.");
     }
 
-    fn number(compiler: *Compiler) void {
+    fn number(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
         const value = std.fmt.parseFloat(
             f64,
             compiler.parser.previous.start[0..compiler.parser.previous.length],
@@ -142,7 +158,8 @@ pub const Compiler = struct {
         compiler.emitConstant(Value.initNumber(value));
     }
 
-    fn string(compiler: *Compiler) void {
+    fn string(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
         const value = zloc.copyString(
             compiler.vm,
             compiler.parser.previous.start[1 .. compiler.parser.previous.length - 1],
@@ -150,7 +167,23 @@ pub const Compiler = struct {
         compiler.emitConstant(Value.initObj(value.?));
     }
 
-    fn unary(compiler: *Compiler) void {
+    fn namedVariable(compiler: *Compiler, name: Token, can_assign: bool) void {
+        var mut_name = name;
+        const arg = compiler.identifierConstant(&mut_name);
+        if (can_assign and compiler.match(.token_equal)) {
+            compiler.expression();
+            compiler.emitBytes(OpCode.op_set_global.u8(), arg);
+        } else {
+            compiler.emitBytes(OpCode.op_get_global.u8(), arg);
+        }
+    }
+
+    fn variable(compiler: *Compiler, can_assign: bool) void {
+        compiler.namedVariable(compiler.parser.previous, can_assign);
+    }
+
+    fn unary(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
         const operatorType = compiler.parser.previous.type;
 
         compiler.parsePrecedence(.prec_unary);
@@ -170,16 +203,106 @@ pub const Compiler = struct {
             return;
         };
 
-        prefixRule(compiler);
+        const can_assign = @intFromEnum(precedence) <= @intFromEnum(Precedence.prec_assignment);
+        prefixRule(compiler, can_assign);
         while (@intFromEnum(precedence) <= @intFromEnum(getRule(compiler.parser.current.type).precedence)) {
             compiler.advance();
             const infixRule: ParseFn = getRule(compiler.parser.previous.type).infix orelse unreachable;
-            infixRule(compiler);
+            infixRule(compiler, can_assign);
         }
+
+        if (can_assign and compiler.match(.token_equal)) {
+            compiler.@"error"("Invalid assignment target.");
+        }
+    }
+
+    fn identifierConstant(compiler: *Compiler, name: *Token) u8 {
+        const value = zloc.copyString(compiler.vm, name.start[0..name.length]);
+
+        return compiler.makeConstant(Value.initObj(value.?));
+    }
+
+    fn parseVariable(compiler: *Compiler, error_message: []const u8) u8 {
+        compiler.consume(.token_identifier, error_message);
+
+        return compiler.identifierConstant(&compiler.parser.previous);
+    }
+
+    fn defineVariable(compiler: *Compiler, global: u8) void {
+        compiler.emitBytes(OpCode.op_define_global.u8(), global);
     }
 
     fn expression(compiler: *Compiler) void {
         compiler.parsePrecedence(.prec_assignment);
+    }
+
+    fn printStatement(compiler: *Compiler) void {
+        compiler.expression();
+        compiler.consume(.token_semicolon, "Expect ';' after value.");
+        compiler.emitByte(OpCode.op_print.u8());
+    }
+
+    fn expressionStatement(compiler: *Compiler) void {
+        compiler.expression();
+        compiler.consume(.token_semicolon, "Expect ';' after expression.");
+        compiler.emitByte(OpCode.op_pop.u8());
+    }
+
+    fn varDeclaration(compiler: *Compiler) void {
+        const global: u8 = compiler.parseVariable("Expect variable name.");
+
+        if (compiler.match(.token_equal)) {
+            compiler.expression();
+        } else {
+            compiler.emitByte(OpCode.op_nil.u8());
+        }
+
+        compiler.consume(.token_semicolon, "Expect ';' after variable declaration.");
+        compiler.defineVariable(global);
+    }
+
+    fn synchronize(compiler: *Compiler) void {
+        compiler.parser.panic_mode = false;
+
+        while (compiler.parser.current.type != .token_eof) {
+            if (compiler.parser.previous.type == .token_semicolon) return;
+
+            switch (compiler.parser.current.type) {
+                .token_class,
+                .token_fun,
+                .token_var,
+                .token_for,
+                .token_if,
+                .token_while,
+                .token_print,
+                .token_return,
+                => return,
+
+                else => {
+                    // Do nothing
+                },
+            }
+
+            compiler.advance();
+        }
+    }
+
+    fn declaration(compiler: *Compiler) void {
+        if (compiler.match(.token_var)) {
+            compiler.varDeclaration();
+        } else {
+            compiler.statement();
+        }
+
+        if (compiler.parser.panic_mode) compiler.synchronize();
+    }
+
+    fn statement(compiler: *Compiler) void {
+        if (compiler.match(.token_print)) {
+            compiler.printStatement();
+        } else {
+            compiler.expressionStatement();
+        }
     }
 
     fn currentChunk(compiler: *Compiler) *Chunk {
@@ -232,7 +355,7 @@ const Precedence = enum {
     prec_primary,
 };
 
-const ParseFn = *const fn (*Compiler) void;
+const ParseFn = *const fn (*Compiler, bool) void;
 
 const ParseRule = struct {
     prefix: ?ParseFn,
@@ -339,7 +462,7 @@ const rules = blk: {
     };
 
     tmp[TokenType.token_identifier.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.variable,
         .infix = null,
         .precedence = .prec_none,
     };

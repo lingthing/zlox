@@ -11,15 +11,17 @@ pub const Table = struct {
     const TABLE_MAX_LOAD = 0.75;
 
     pub fn init() Table {
+        // TODO: 换更好的方式
+        const gpa = @import("common_allocator.zig").gpa;
+        const entries = gpa.alloc(Entry, 0) catch unreachable;
         return .{
             .count = 0,
             .capacity = 0,
-            .entries = undefined,
+            .entries = entries.ptr,
         };
     }
 
     pub fn deinit(table: *Table) void {
-        if (table.entries == undefined) return;
         // TODO: 换更好的方式
         const gpa = @import("common_allocator.zig").gpa;
         gpa.free(table.entries[0..table.capacity]);
@@ -49,7 +51,7 @@ pub const Table = struct {
         // TODO: 改成一种更好的方式
         const gpa = @import("common_allocator.zig").gpa;
         var entries = gpa.alloc(Entry, capacity) catch {
-            // handle oom
+            // TODO: handle oom
             unreachable;
         };
         // zig 0.13.0 不支持这种写法
@@ -74,9 +76,7 @@ pub const Table = struct {
             }
         }
 
-        if (table.entries != undefined) {
-            gpa.free(table.entries[0..table.capacity]);
-        }
+        gpa.free(table.entries[0..table.capacity]);
 
         table.entries = entries.ptr;
         table.capacity = capacity;

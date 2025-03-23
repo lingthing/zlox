@@ -29,12 +29,17 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
     const instruction = OpCode.from(chunk.get(offset));
     switch (instruction) {
-        .op_constant => {
+        .op_constant,
+        .op_get_global,
+        .op_define_global,
+        .op_set_global,
+        => {
             return constantInstruction(instruction.toString(), chunk, offset);
         },
         .op_nil,
         .op_true,
         .op_false,
+        .op_pop,
         .op_equal,
         .op_greater,
         .op_less,
@@ -42,15 +47,11 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_subtract,
         .op_multiply,
         .op_divide,
-        => {
-            return simpleInstruction(instruction.toString(), offset);
-        },
         .op_not,
         .op_negate,
+        .op_print,
+        .op_return,
         => {
-            return simpleInstruction(instruction.toString(), offset);
-        },
-        .op_return => {
             return simpleInstruction(instruction.toString(), offset);
         },
     }
