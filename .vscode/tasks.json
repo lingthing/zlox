@@ -1,0 +1,17 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "zig",
+            "args": [
+                "build",
+                "-Doptimize=Debug", // 不能裸机调试用，可用Windows的Zig程序调试
+                // "-Doptimize=ReleaseSafe",   // 调试可用、可运行、编译器安全优化
+                // "-Doptimize=ReleaseFast",      // 调试可用、可运行
+                // "-Doptimize=ReleaseSmall",  // 最小包，不可调试，可运行、不进行安全优化
+            ],
+        }
+    ]
+}

@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "(Windows) Debug test runner|cppvsdbg",
+            "program": "${workspaceFolder}\\zig-out\\bin\\zloc.exe",
+            "cwd": "${workspaceFolder}\\zig-out\\bin",
+            "symbolSearchPath": "${workspaceFolder}\\zig-out\\bin",
+
+            "environment": [],
+            // "externalConsole": false,
+            "logging": {
+                "moduleLoad": false
+            },
+            "preLaunchTask": "build",
+        }
+    ]
+}

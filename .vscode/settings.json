@@ -1,0 +1,14 @@
+{
+	"search.exclude": {
+		".vscode": true
+	},
+	"files.exclude": {
+		"**/node_modules": true,
+		"**/.svn": true,
+		"**/.git": true,
+		"**/.DS_Store": true,
+		"**/*.pdb": true,
+		".idea": true,
+		".zig-cache": true
+	}
+}
