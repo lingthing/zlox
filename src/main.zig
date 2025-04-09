@@ -85,6 +85,7 @@ fn readFile(path: []const u8) []u8 {
         stderr.print("Not enough memory to read \"{s}\".\n", .{path}) catch unreachable;
         std.process.exit(74);
     };
+    file.seekTo(0) catch unreachable;
     _ = file.readAll(buf) catch {
         stderr.print("Could not read file \"{s}\".\n", .{path}) catch unreachable;
         std.process.exit(74);
