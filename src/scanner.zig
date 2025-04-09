@@ -209,6 +209,12 @@ pub const Token = struct {
     start: [*]const u8,
     length: u32,
     line: u32,
+
+    pub fn eql(a: *Token, b: *Token) bool {
+        if (a.length != b.length) return false;
+
+        return mem.eql(u8, a.start[0..a.length], b.start[0..b.length]);
+    }
 };
 
 pub const TokenType = enum {

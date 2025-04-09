@@ -16,12 +16,20 @@ pub const Compiler = struct {
     parser: Parser,
     compiling_chunk: *Chunk,
 
+    locals: [std.math.maxInt(u8) + 1]Local,
+    local_count: usize,
+    scope_depth: usize,
+
     pub fn init(vm: *VM) Compiler {
         const compiler = Compiler{
             .vm = vm,
             .scanner = undefined,
             .parser = undefined,
             .compiling_chunk = undefined,
+
+            .locals = undefined,
+            .local_count = 0,
+            .scope_depth = 0,
         };
         return compiler;
     }
@@ -109,6 +117,20 @@ pub const Compiler = struct {
         }
     }
 
+    fn beginScope(compiler: *Compiler) void {
+        compiler.scope_depth += 1;
+    }
+
+    fn endScope(compiler: *Compiler) void {
+        compiler.scope_depth -= 1;
+        while (compiler.local_count > 0 and
+            compiler.locals[compiler.local_count - 1].depth > compiler.scope_depth)
+        {
+            compiler.emitByte(OpCode.op_pop.u8());
+            compiler.local_count -= 1;
+        }
+    }
+
     fn binary(compiler: *Compiler, can_assign: bool) void {
         _ = can_assign;
         const operatorType = compiler.parser.previous.type;
@@ -169,12 +191,23 @@ pub const Compiler = struct {
 
     fn namedVariable(compiler: *Compiler, name: Token, can_assign: bool) void {
         var mut_name = name;
-        const arg = compiler.identifierConstant(&mut_name);
+        var get_op: u8 = undefined;
+        var set_op: u8 = undefined;
+        var arg = compiler.resolveLocal(&mut_name);
+        if (arg != -1) {
+            get_op = OpCode.op_get_local.u8();
+            set_op = OpCode.op_set_local.u8();
+        } else {
+            arg = compiler.identifierConstant(&mut_name);
+            get_op = OpCode.op_get_global.u8();
+            set_op = OpCode.op_set_global.u8();
+        }
+
         if (can_assign and compiler.match(.token_equal)) {
             compiler.expression();
-            compiler.emitBytes(OpCode.op_set_global.u8(), arg);
+            compiler.emitBytes(set_op, @as(u8, @intCast(arg)));
         } else {
-            compiler.emitBytes(OpCode.op_get_global.u8(), arg);
+            compiler.emitBytes(get_op, @as(u8, @intCast(arg)));
         }
     }
 
@@ -222,18 +255,91 @@ pub const Compiler = struct {
         return compiler.makeConstant(Value.initObj(value.?));
     }
 
+    fn resolveLocal(compiler: *Compiler, name: *Token) isize {
+        var i = compiler.local_count;
+        while (i > 0) {
+            i -= 1;
+            const local = &compiler.locals[i];
+            if (name.eql(&local.name)) {
+                if (local.depth == -1) {
+                    compiler.@"error"("Can't read local variable in its own initializer.");
+                }
+
+                return @intCast(i);
+            }
+        }
+
+        return -1;
+    }
+
+    fn addLocal(compiler: *Compiler, name: Token) void {
+        if (compiler.local_count == compiler.locals.len) {
+            compiler.@"error"("Too many local variables in function.");
+            return;
+        }
+
+        const local = &compiler.locals[compiler.local_count];
+        compiler.local_count += 1;
+
+        local.name = name;
+        local.depth = -1; // -1 represent variable uninitialized
+    }
+
+    fn declareVariable(compiler: *Compiler) void {
+        if (compiler.scope_depth == 0) return;
+
+        const name = &compiler.parser.previous;
+        var i = compiler.local_count;
+        while (i > 0) {
+            i -= 1;
+            const local = &compiler.locals[i];
+            if (local.depth != -1 and local.depth < compiler.scope_depth) {
+                break;
+            }
+
+            if (name.eql(&local.name)) {
+                compiler.@"error"("Already a variable with this name in this scope.");
+            }
+        }
+
+        compiler.addLocal(name.*);
+    }
+
     fn parseVariable(compiler: *Compiler, error_message: []const u8) u8 {
         compiler.consume(.token_identifier, error_message);
+
+        compiler.declareVariable();
+        if (compiler.scope_depth > 0) {
+            return 0;
+        }
 
         return compiler.identifierConstant(&compiler.parser.previous);
     }
 
+    fn markInitialized(compiler: *Compiler) void {
+        if (compiler.scope_depth == 0) return;
+        compiler.locals[compiler.local_count - 1].depth = @intCast(compiler.scope_depth);
+    }
+
     fn defineVariable(compiler: *Compiler, global: u8) void {
+        if (compiler.scope_depth > 0) {
+            compiler.markInitialized();
+            return;
+        }
+
         compiler.emitBytes(OpCode.op_define_global.u8(), global);
     }
 
     fn expression(compiler: *Compiler) void {
         compiler.parsePrecedence(.prec_assignment);
+    }
+
+    fn block(compiler: *Compiler) void {
+        while (!compiler.check(.token_right_brace) and !compiler.check(.token_eof)) {
+            compiler.declaration();
+        }
+
+        compiler.consume(.token_right_brace, "Expect '}' after block.");
     }
 
     fn printStatement(compiler: *Compiler) void {
@@ -300,6 +406,10 @@ pub const Compiler = struct {
     fn statement(compiler: *Compiler) void {
         if (compiler.match(.token_print)) {
             compiler.printStatement();
+        } else if (compiler.match(.token_left_brace)) {
+            compiler.beginScope();
+            compiler.block();
+            compiler.endScope();
         } else {
             compiler.expressionStatement();
         }
@@ -361,6 +471,11 @@ const ParseRule = struct {
     prefix: ?ParseFn,
     infix: ?ParseFn,
     precedence: Precedence,
+};
+
+const Local = struct {
+    name: Token,
+    depth: isize,
 };
 
 const rules = blk: {

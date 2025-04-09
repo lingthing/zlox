@@ -29,13 +29,6 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
     const instruction = OpCode.from(chunk.get(offset));
     switch (instruction) {
-        .op_constant,
-        .op_get_global,
-        .op_define_global,
-        .op_set_global,
-        => {
-            return constantInstruction(instruction.toString(), chunk, offset);
-        },
         .op_nil,
         .op_true,
         .op_false,
@@ -54,6 +47,18 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         => {
             return simpleInstruction(instruction.toString(), offset);
         },
+        .op_constant,
+        .op_get_global,
+        .op_define_global,
+        .op_set_global,
+        => {
+            return constantInstruction(instruction.toString(), chunk, offset);
+        },
+        .op_get_local,
+        .op_set_local,
+        => {
+            return byteInstruction(instruction.toString(), chunk, offset);
+        },
     }
 
     return offset + 1;
@@ -71,6 +76,14 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     stdout.print("{s:<16} {d:>4} '", .{ name, constant }) catch unreachable;
     zloc.printValue(chunk.constants.items[constant]);
     stdout.print("'\n", .{}) catch unreachable;
+
+    return offset + 2;
+}
+
+fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const stdout = utils.getStdoutWriter();
+    const slot = chunk.get(offset + 1);
+    stdout.print("{s:<16} {d:>4}\n", .{ name, slot }) catch unreachable;
 
     return offset + 2;
 }

@@ -156,6 +156,14 @@ pub const VM = struct {
                 .op_pop => {
                     _ = vm.pop();
                 },
+                .op_get_local => {
+                    const slot = vm.readByte();
+                    vm.push(vm.stack[slot]);
+                },
+                .op_set_local => {
+                    const slot = vm.readByte();
+                    vm.stack[slot] = vm.peek(0);
+                },
                 .op_get_global => {
                     const name = vm.readString();
                     var value: Value = undefined;
