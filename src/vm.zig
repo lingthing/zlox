@@ -96,6 +96,14 @@ pub const VM = struct {
         return byte;
     }
 
+    fn readShort(vm: *VM) u16 {
+        const byte1 = vm.ip[0];
+        const byte2 = vm.ip[1];
+        vm.ip += 2;
+
+        return @as(u16, @as(u16, byte1) << 8 | byte2);
+    }
+
     fn readConstant(vm: *VM) Value {
         return vm.chunk.constants.items[vm.readByte()];
     }
@@ -284,6 +292,20 @@ pub const VM = struct {
                 .op_print => {
                     zloc.printValue(vm.pop());
                     stdout.print("\n", .{}) catch unreachable;
+                },
+                .op_jump => {
+                    const offset = vm.readShort();
+                    vm.ip += offset;
+                },
+                .op_jump_if_false => {
+                    const offset = vm.readShort();
+                    if (isFalsey(vm.peek(0))) {
+                        vm.ip += offset;
+                    }
+                },
+                .op_loop => {
+                    const offset = vm.readShort();
+                    vm.ip -= offset;
                 },
                 .op_return => {
                     return .ok;

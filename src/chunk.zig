@@ -39,4 +39,8 @@ pub const Chunk = struct {
     pub fn get(self: *Chunk, index: usize) u8 {
         return self.code.items[index];
     }
+
+    pub fn set(self: *Chunk, index: usize, value: u8) void {
+        self.code.items[index] = value;
+    }
 };

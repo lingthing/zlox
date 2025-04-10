@@ -89,6 +89,26 @@ pub const Compiler = struct {
         compiler.emitByte(byte2);
     }
 
+    fn emitJump(compiler: *Compiler, instruction: u8) usize {
+        compiler.emitByte(instruction);
+        compiler.emitByte(0xff);
+        compiler.emitByte(0xff);
+
+        return compiler.currentChunk().count() - 2;
+    }
+
+    fn emitLoop(compiler: *Compiler, loop_start: usize) void {
+        compiler.emitByte(OpCode.op_loop.u8());
+
+        const offset = compiler.currentChunk().count() - loop_start + 2;
+        if (offset > std.math.maxInt(u16)) {
+            compiler.@"error"("Loop body too large.");
+        }
+
+        compiler.emitByte(@as(u8, @truncate(offset >> 8)));
+        compiler.emitByte(@as(u8, @truncate(offset)));
+    }
+
     fn emitReturn(compiler: *Compiler) void {
         compiler.emitByte(OpCode.op_return.u8());
     }
@@ -105,6 +125,16 @@ pub const Compiler = struct {
 
     fn emitConstant(compiler: *Compiler, value: Value) void {
         compiler.emitBytes(OpCode.op_constant.u8(), compiler.makeConstant(value));
+    }
+
+    fn patchJump(compiler: *Compiler, offset: usize) void {
+        const jump = compiler.currentChunk().count() - offset - 2;
+        if (jump > std.math.maxInt(u16)) {
+            compiler.@"error"("Too much code to jump over.");
+        }
+
+        compiler.currentChunk().set(offset, @as(u8, @truncate(jump >> 8)));
+        compiler.currentChunk().set(offset + 1, @as(u8, @truncate(jump)));
     }
 
     fn endCompiler(compiler: *Compiler) void {
@@ -330,6 +360,30 @@ pub const Compiler = struct {
         compiler.emitBytes(OpCode.op_define_global.u8(), global);
     }
 
+    fn and_(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
+
+        const end_jump = compiler.emitJump(OpCode.op_jump_if_false.u8());
+
+        compiler.emitByte(OpCode.op_pop.u8());
+        compiler.parsePrecedence(.prec_and);
+
+        compiler.patchJump(end_jump);
+    }
+
+    fn or_(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
+
+        const else_jump = compiler.emitJump(OpCode.op_jump_if_false.u8());
+        const end_jump = compiler.emitJump(OpCode.op_jump.u8());
+
+        compiler.patchJump(else_jump);
+        compiler.emitByte(OpCode.op_pop.u8());
+
+        compiler.parsePrecedence(.prec_or);
+        compiler.patchJump(end_jump);
+    }
+
     fn expression(compiler: *Compiler) void {
         compiler.parsePrecedence(.prec_assignment);
     }
@@ -346,6 +400,88 @@ pub const Compiler = struct {
         compiler.expression();
         compiler.consume(.token_semicolon, "Expect ';' after value.");
         compiler.emitByte(OpCode.op_print.u8());
+    }
+
+    fn ifStatement(compiler: *Compiler) void {
+        compiler.consume(.token_left_paren, "Expect '(' after 'if'.");
+        compiler.expression();
+        compiler.consume(.token_right_paren, "Expect ')' after condition.");
+
+        const then_jump = compiler.emitJump(OpCode.op_jump_if_false.u8());
+        compiler.emitByte(OpCode.op_pop.u8());
+        compiler.statement();
+
+        const else_jump = compiler.emitJump(OpCode.op_jump.u8());
+
+        compiler.patchJump(then_jump);
+
+        compiler.emitByte(OpCode.op_pop.u8());
+        if (compiler.match(.token_else)) {
+            compiler.statement();
+        }
+
+        compiler.patchJump(else_jump);
+    }
+
+    fn whileStatement(compiler: *Compiler) void {
+        const loop_start = compiler.currentChunk().count();
+
+        compiler.consume(.token_left_paren, "Expect '(' after 'while'.");
+        compiler.expression();
+        compiler.consume(.token_right_paren, "Expect ')' after condition.");
+
+        const exit_jump = compiler.emitJump(OpCode.op_jump_if_false.u8());
+        compiler.emitByte(OpCode.op_pop.u8());
+        compiler.statement();
+
+        compiler.emitLoop(loop_start);
+        compiler.patchJump(exit_jump);
+        compiler.emitByte(OpCode.op_pop.u8());
+    }
+
+    fn forStatement(compiler: *Compiler) void {
+        compiler.beginScope();
+
+        compiler.consume(.token_left_paren, "Expect '(' after 'for'.");
+        if (compiler.match(.token_semicolon)) {
+            // No initializer.
+        } else if (compiler.match(.token_var)) {
+            compiler.varDeclaration();
+        } else {
+            compiler.expressionStatement();
+        }
+
+        var loop_start = compiler.currentChunk().count();
+        var exit_jump: isize = -1;
+        if (!compiler.match(.token_semicolon)) {
+            compiler.expression();
+            compiler.consume(.token_semicolon, "Expect ';' after loop condition.");
+
+            exit_jump = @intCast(compiler.emitJump(OpCode.op_jump_if_false.u8()));
+            // exit_jump = @as(isize, @intCast(compiler.emitJump(OpCode.op_jump_if_false.u8())));
+            compiler.emitByte(OpCode.op_pop.u8()); // Condition
+        }
+
+        if (!compiler.match(.token_right_paren)) {
+            const body_jump = compiler.emitJump(OpCode.op_jump.u8());
+            const increment_start = compiler.currentChunk().count();
+            compiler.expression();
+            compiler.emitByte(OpCode.op_pop.u8());
+            compiler.consume(.token_right_paren, "Expect ')' after for clauses.");
+
+            compiler.emitLoop(loop_start);
+            loop_start = increment_start;
+            compiler.patchJump(body_jump);
+        }
+
+        compiler.statement();
+        compiler.emitLoop(loop_start);
+        if (exit_jump != -1) {
+            compiler.patchJump(@intCast(exit_jump));
+            compiler.emitByte(OpCode.op_pop.u8()); // Condition
+        }
+
+        compiler.endScope();
     }
 
     fn expressionStatement(compiler: *Compiler) void {
@@ -406,6 +542,12 @@ pub const Compiler = struct {
     fn statement(compiler: *Compiler) void {
         if (compiler.match(.token_print)) {
             compiler.printStatement();
+        } else if (compiler.match(.token_if)) {
+            compiler.ifStatement();
+        } else if (compiler.match(.token_while)) {
+            compiler.whileStatement();
+        } else if (compiler.match(.token_for)) {
+            compiler.forStatement();
         } else if (compiler.match(.token_left_brace)) {
             compiler.beginScope();
             compiler.block();
@@ -594,8 +736,8 @@ const rules = blk: {
 
     tmp[TokenType.token_and.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.and_,
+        .precedence = .prec_and,
     };
     tmp[TokenType.token_class.u8()] = .{
         .prefix = null,
@@ -634,8 +776,8 @@ const rules = blk: {
     };
     tmp[TokenType.token_or.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.or_,
+        .precedence = .prec_or,
     };
     tmp[TokenType.token_print.u8()] = .{
         .prefix = null,
