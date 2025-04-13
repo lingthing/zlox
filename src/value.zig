@@ -72,6 +72,14 @@ pub const Value = struct {
         return value.isObj() and value.objType() == obj_type;
     }
 
+    pub fn isFunction(value: Value) bool {
+        return value.isObjType(.obj_function);
+    }
+
+    pub fn isNative(value: Value) bool {
+        return value.isObjType(.obj_native);
+    }
+
     pub fn isString(value: Value) bool {
         return value.isObjType(.obj_string);
     }
@@ -86,6 +94,14 @@ pub const Value = struct {
 
     pub fn asObj(value: Value) *Obj {
         return value.as.obj;
+    }
+
+    pub fn asFunction(value: Value) *ObjFunction {
+        return @alignCast(@ptrCast(value.as.obj));
+    }
+
+    pub fn asNative(value: Value) *ObjNative {
+        return @alignCast(@ptrCast(value.as.obj));
     }
 
     pub fn asString(value: Value) *ObjString {
@@ -117,3 +133,5 @@ const zloc = @import("zloc.zig");
 const ObjType = zloc.ObjType;
 const Obj = zloc.Obj;
 const ObjString = zloc.ObjString;
+const ObjFunction = zloc.ObjFunction;
+const ObjNative = zloc.ObjNative;

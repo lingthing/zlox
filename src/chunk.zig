@@ -36,11 +36,19 @@ pub const Chunk = struct {
         return self.code.items.len;
     }
 
-    pub fn get(self: *Chunk, index: usize) u8 {
+    pub fn getByte(self: *Chunk, index: usize) u8 {
         return self.code.items[index];
     }
 
-    pub fn set(self: *Chunk, index: usize, value: u8) void {
+    pub fn setByte(self: *Chunk, index: usize, value: u8) void {
         self.code.items[index] = value;
+    }
+
+    pub fn getLine(self: *Chunk, index: usize) u32 {
+        return self.lines.items[index];
+    }
+
+    pub fn getConstant(self: *Chunk, index: usize) Value {
+        return self.constants.items[index];
     }
 };

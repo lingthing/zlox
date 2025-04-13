@@ -6,6 +6,9 @@ const OpCode = zloc.OpCode;
 const Compiler = zloc.Compiler;
 const Obj = zloc.Obj;
 const ObjString = zloc.ObjString;
+const ObjFunction = zloc.ObjFunction;
+const ObjNative = zloc.ObjNative;
+const NativeFn = zloc.NativeFn;
 const Table = zloc.Table;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
@@ -16,12 +19,65 @@ pub const InterpretResult = enum {
     runtime_error,
 };
 
-pub const STACK_SIZE = 256;
+pub const FRAMES_MAX = 64;
+pub const STACK_SIZE = FRAMES_MAX * 256;
+
+const CallFrame = struct {
+    function: *ObjFunction,
+    ip: [*]u8,
+    slots: [*]Value,
+
+    fn readByte(frame: *CallFrame) u8 {
+        const byte = frame.ip[0];
+        frame.ip += 1;
+
+        return byte;
+    }
+
+    fn readShort(frame: *CallFrame) u16 {
+        const byte1 = frame.ip[0];
+        const byte2 = frame.ip[1];
+        frame.ip += 2;
+
+        return @as(u16, @as(u16, byte1) << 8 | byte2);
+    }
+
+    fn readConstant(frame: *CallFrame) Value {
+        return frame.function.chunk.getConstant(frame.readByte());
+    }
+
+    fn readString(frame: *CallFrame) *ObjString {
+        return frame.readConstant().asString();
+    }
+};
+
+fn clockNative(args: []Value) Value {
+    _ = args;
+
+    return Value.initNumber(@floatFromInt(std.time.milliTimestamp()));
+}
+
+fn exitNative(args: []Value) Value {
+    _ = args;
+
+    std.process.exit(0);
+}
+
+fn fib(n: f64) f64 {
+    if (n <= 0) return 0;
+    if (n <= 2) return 1;
+
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn fibNative(args: []Value) Value {
+    return Value.initNumber(fib(args[0].asNumber()));
+}
 
 pub const VM = struct {
     gpa: std.mem.Allocator,
-    chunk: *Chunk,
-    ip: [*]u8,
+    frames: [FRAMES_MAX]CallFrame,
+    frame_count: usize,
     stack: []Value,
     stack_top: [*]Value,
     globals: Table,
@@ -37,6 +93,10 @@ pub const VM = struct {
         vm.objects = null;
         vm.globals = Table.init();
         vm.strings = Table.init();
+
+        vm.defineNative("clock", clockNative);
+        vm.defineNative("exit", exitNative);
+        vm.defineNative("fib", fibNative);
 
         return vm;
     }
@@ -60,22 +120,19 @@ pub const VM = struct {
     }
 
     pub fn interpret(vm: *VM, source: []const u8) InterpretResult {
-        var chunk = Chunk.init(vm.gpa);
-        defer chunk.deinit();
+        var compiler = Compiler.init(vm, .type_script);
+        const function = compiler.compile(source) orelse return .compile_error;
 
-        var compiler = Compiler.init(vm);
-        if (!compiler.compile(source, &chunk)) {
-            return .compile_error;
-        }
-
-        vm.chunk = &chunk;
-        vm.ip = chunk.code.items.ptr;
+        vm.resetStack();
+        vm.push(Value.initObj(function));
+        _ = vm.call(function, 0);
 
         return vm.run();
     }
 
     fn resetStack(vm: *VM) void {
         vm.stack_top = vm.stack.ptr;
+        vm.frame_count = 0;
     }
 
     fn runtimeError(vm: *VM, comptime fmt: []const u8, args: anytype) void {
@@ -83,33 +140,31 @@ pub const VM = struct {
         stderr.print(fmt, args) catch unreachable;
         stderr.print("\n", .{}) catch unreachable;
 
-        const instruction = @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr) - 1;
-        const line = vm.chunk.lines.items[instruction];
-        stderr.print("[line {d}] in script\n", .{line}) catch unreachable;
+        var i: usize = vm.frame_count;
+        while (i > 0) {
+            i -= 1;
+            const frame = &vm.frames[i];
+            const function = frame.function;
+            const instruction = @intFromPtr(frame.ip) - @intFromPtr(function.chunk.code.items.ptr) - 1;
+            const line = function.chunk.getLine(instruction);
+            stderr.print("[line {d}] in ", .{line}) catch unreachable;
+            if (function.name) |name| {
+                stderr.print("{s}()", .{name.chars}) catch unreachable;
+            } else {
+                stderr.print("script", .{}) catch unreachable;
+            }
+            stderr.print("\n", .{}) catch unreachable;
+        }
+
         vm.resetStack();
     }
 
-    fn readByte(vm: *VM) u8 {
-        const byte = vm.ip[0];
-        vm.ip += 1;
-
-        return byte;
-    }
-
-    fn readShort(vm: *VM) u16 {
-        const byte1 = vm.ip[0];
-        const byte2 = vm.ip[1];
-        vm.ip += 2;
-
-        return @as(u16, @as(u16, byte1) << 8 | byte2);
-    }
-
-    fn readConstant(vm: *VM) Value {
-        return vm.chunk.constants.items[vm.readByte()];
-    }
-
-    fn readString(vm: *VM) *ObjString {
-        return vm.readConstant().asString();
+    fn defineNative(vm: *VM, name: []const u8, function: NativeFn) void {
+        vm.push(Value.initObj(zloc.copyString(vm, name).?));
+        vm.push(Value.initObj(zloc.newNative(vm, function).?));
+        _ = vm.globals.set(vm.stack[0].asString(), vm.stack[1]);
+        _ = vm.pop();
+        _ = vm.pop();
     }
 
     fn push(vm: *VM, value: Value) void {
@@ -131,8 +186,56 @@ pub const VM = struct {
         return @ptrCast(vm.stack_top - 1);
     }
 
+    fn callValue(vm: *VM, callee: Value, arg_count: u8) bool {
+        if (callee.isObj()) {
+            switch (callee.objType()) {
+                .obj_function => {
+                    return vm.call(callee.asFunction(), arg_count);
+                },
+                .obj_native => {
+                    const native = callee.asNative();
+                    const result = native.function((vm.stack_top - arg_count)[0..arg_count]);
+                    vm.stack_top -= arg_count + 1;
+                    vm.push(result);
+
+                    return true;
+                },
+                else => {
+                    // Non-callable object type
+                },
+            }
+        }
+
+        vm.runtimeError("Can only call functions or classed.", .{});
+        return false;
+    }
+
+    fn call(vm: *VM, function: *ObjFunction, arg_count: u8) bool {
+        if (arg_count != function.arity) {
+            vm.runtimeError("Expected {d} argument(s), but got {d}.", .{ function.arity, arg_count });
+
+            return false;
+        }
+
+        if (vm.frame_count == FRAMES_MAX) {
+            vm.runtimeError("Stack overflow.", .{});
+
+            return false;
+        }
+
+        var frame = &vm.frames[vm.frame_count];
+        vm.frame_count += 1;
+        frame.function = function;
+        frame.ip = function.chunk.code.items.ptr;
+        frame.slots = vm.stack_top - arg_count - 1;
+
+        return true;
+    }
+
     fn run(vm: *VM) InterpretResult {
         const stdout = utils.getStdoutWriter();
+        var frame = &vm.frames[vm.frame_count - 1];
+
         while (true) {
             if (debug.DEBUG_TRACE_EXECUTION) {
                 stdout.print("          ", .{}) catch unreachable;
@@ -143,13 +246,16 @@ pub const VM = struct {
                     stdout.print(" ]", .{}) catch unreachable;
                 }
                 stdout.print("\n", .{}) catch unreachable;
-                _ = debug.disassembleInstruction(vm.chunk, @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr));
+                _ = debug.disassembleInstruction(
+                    &frame.function.chunk,
+                    @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr),
+                );
             }
 
-            const instruction = OpCode.from(vm.readByte());
+            const instruction = OpCode.from(frame.readByte());
             switch (instruction) {
                 .op_constant => {
-                    const constant = vm.readConstant();
+                    const constant = frame.readConstant();
                     vm.push(constant);
                 },
                 .op_nil => {
@@ -165,15 +271,15 @@ pub const VM = struct {
                     _ = vm.pop();
                 },
                 .op_get_local => {
-                    const slot = vm.readByte();
-                    vm.push(vm.stack[slot]);
+                    const slot = frame.readByte();
+                    vm.push(frame.slots[slot]);
                 },
                 .op_set_local => {
-                    const slot = vm.readByte();
-                    vm.stack[slot] = vm.peek(0);
+                    const slot = frame.readByte();
+                    frame.slots[slot] = vm.peek(0);
                 },
                 .op_get_global => {
-                    const name = vm.readString();
+                    const name = frame.readString();
                     var value: Value = undefined;
                     if (!vm.globals.get(name, &value)) {
                         vm.runtimeError("Undefined variable '{s}'.", .{name.chars});
@@ -183,12 +289,12 @@ pub const VM = struct {
                     vm.push(value);
                 },
                 .op_define_global => {
-                    const name = vm.readString();
+                    const name = frame.readString();
                     _ = vm.globals.set(name, vm.peek(0));
                     _ = vm.pop();
                 },
                 .op_set_global => {
-                    const name = vm.readString();
+                    const name = frame.readString();
                     if (vm.globals.set(name, vm.peek(0))) {
                         _ = vm.globals.delete(name);
                         vm.runtimeError("Undefined variable '{s}'.", .{name.chars});
@@ -294,21 +400,38 @@ pub const VM = struct {
                     stdout.print("\n", .{}) catch unreachable;
                 },
                 .op_jump => {
-                    const offset = vm.readShort();
-                    vm.ip += offset;
+                    const offset = frame.readShort();
+                    frame.ip += offset;
                 },
                 .op_jump_if_false => {
-                    const offset = vm.readShort();
+                    const offset = frame.readShort();
                     if (isFalsey(vm.peek(0))) {
-                        vm.ip += offset;
+                        frame.ip += offset;
                     }
                 },
                 .op_loop => {
-                    const offset = vm.readShort();
-                    vm.ip -= offset;
+                    const offset = frame.readShort();
+                    frame.ip -= offset;
+                },
+                .op_call => {
+                    const arg_count = frame.readByte();
+                    if (!vm.callValue(vm.peek(arg_count), arg_count)) {
+                        return .runtime_error;
+                    }
+                    frame = &vm.frames[vm.frame_count - 1];
                 },
                 .op_return => {
-                    return .ok;
+                    const result = vm.pop();
+                    vm.frame_count -= 1;
+                    if (vm.frame_count == 0) {
+                        _ = vm.pop();
+
+                        return .ok;
+                    }
+
+                    vm.stack_top = frame.slots;
+                    vm.push(result);
+                    frame = &vm.frames[vm.frame_count - 1];
                 },
             }
         }

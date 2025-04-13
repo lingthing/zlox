@@ -9,59 +9,85 @@ const TokenType = zloc.TokenType;
 const Chunk = zloc.Chunk;
 const OpCode = zloc.OpCode;
 const Value = zloc.Value;
+const ObjFunction = zloc.ObjFunction;
 
 pub const Compiler = struct {
+    var scanner: Scanner = undefined;
+    var parser: Parser = undefined;
+    var scope_depth: usize = 0;
+
     vm: *VM,
-    scanner: Scanner,
-    parser: Parser,
-    compiling_chunk: *Chunk,
+
+    function: *ObjFunction,
+    type: FunctionType,
 
     locals: [std.math.maxInt(u8) + 1]Local,
     local_count: usize,
-    scope_depth: usize,
 
-    pub fn init(vm: *VM) Compiler {
-        const compiler = Compiler{
+    const FunctionCompiler = struct {
+        compiler: *Compiler,
+        function: *ObjFunction,
+        type: FunctionType,
+    };
+
+    pub fn init(vm: *VM, function_type: FunctionType) Compiler {
+        var compiler = Compiler{
             .vm = vm,
-            .scanner = undefined,
-            .parser = undefined,
-            .compiling_chunk = undefined,
+
+            .function = zloc.newFunction(vm).?,
+            .type = function_type,
 
             .locals = undefined,
             .local_count = 0,
-            .scope_depth = 0,
         };
+
+        if (function_type != .type_script) {
+            compiler.function.name = zloc.copyString(
+                vm,
+                parser.previous.start[0..parser.previous.length],
+            );
+        }
+
+        var local = &compiler.locals[0];
+        compiler.local_count += 1;
+        local.depth = 0;
+        local.name.start = "";
+        local.name.length = 0;
+
         return compiler;
     }
 
-    pub fn compile(compiler: *Compiler, source: []const u8, chunk: *Chunk) bool {
-        compiler.scanner = Scanner.init(source);
-        compiler.compiling_chunk = chunk;
-        compiler.parser.had_error = false;
-        compiler.parser.panic_mode = false;
+    pub fn compile(compiler: *Compiler, source: []const u8) ?*ObjFunction {
+        scanner = Scanner.init(source);
+        parser.had_error = false;
+        parser.panic_mode = false;
 
         compiler.advance();
         while (!compiler.match(.token_eof)) {
             compiler.declaration();
         }
-        compiler.endCompiler();
+        const function = compiler.endCompiler();
 
-        return !compiler.parser.had_error;
+        if (parser.had_error) {
+            return null;
+        } else {
+            return function;
+        }
     }
 
     fn advance(compiler: *Compiler) void {
-        compiler.parser.previous = compiler.parser.current;
+        parser.previous = parser.current;
 
         while (true) {
-            compiler.parser.current = compiler.scanner.scanToken();
-            if (compiler.parser.current.type != .token_error) break;
+            parser.current = scanner.scanToken();
+            if (parser.current.type != .token_error) break;
 
-            compiler.errorAtCurrent(compiler.parser.current.start[0..compiler.parser.current.length]);
+            compiler.errorAtCurrent(parser.current.start[0..parser.current.length]);
         }
     }
 
     fn consume(compiler: *Compiler, token_type: TokenType, message: []const u8) void {
-        if (compiler.parser.current.type == token_type) {
+        if (parser.current.type == token_type) {
             compiler.advance();
             return;
         }
@@ -70,7 +96,9 @@ pub const Compiler = struct {
     }
 
     fn check(compiler: *Compiler, token_type: TokenType) bool {
-        return compiler.parser.current.type == token_type;
+        _ = compiler;
+
+        return parser.current.type == token_type;
     }
 
     fn match(compiler: *Compiler, token_type: TokenType) bool {
@@ -81,7 +109,7 @@ pub const Compiler = struct {
     }
 
     fn emitByte(compiler: *Compiler, byte: u8) void {
-        compiler.currentChunk().write(byte, compiler.parser.previous.line);
+        compiler.currentChunk().write(byte, parser.previous.line);
     }
 
     fn emitBytes(compiler: *Compiler, byte1: u8, byte2: u8) void {
@@ -110,6 +138,7 @@ pub const Compiler = struct {
     }
 
     fn emitReturn(compiler: *Compiler) void {
+        compiler.emitByte(OpCode.op_nil.u8());
         compiler.emitByte(OpCode.op_return.u8());
     }
 
@@ -133,28 +162,37 @@ pub const Compiler = struct {
             compiler.@"error"("Too much code to jump over.");
         }
 
-        compiler.currentChunk().set(offset, @as(u8, @truncate(jump >> 8)));
-        compiler.currentChunk().set(offset + 1, @as(u8, @truncate(jump)));
+        compiler.currentChunk().setByte(offset, @as(u8, @truncate(jump >> 8)));
+        compiler.currentChunk().setByte(offset + 1, @as(u8, @truncate(jump)));
     }
 
-    fn endCompiler(compiler: *Compiler) void {
+    fn endCompiler(compiler: *Compiler) ?*ObjFunction {
         compiler.emitReturn();
 
+        const function = compiler.function;
+
         if (debug.DEBUG_PRINT_CODE) {
-            if (!compiler.parser.had_error) {
-                debug.disassembleChunk(compiler.currentChunk(), "code");
+            if (!parser.had_error) {
+                debug.disassembleChunk(
+                    compiler.currentChunk(),
+                    if (function.name) |name| name.chars else "<script>",
+                );
             }
         }
+
+        return function;
     }
 
     fn beginScope(compiler: *Compiler) void {
-        compiler.scope_depth += 1;
+        _ = compiler;
+
+        scope_depth += 1;
     }
 
     fn endScope(compiler: *Compiler) void {
-        compiler.scope_depth -= 1;
+        scope_depth -= 1;
         while (compiler.local_count > 0 and
-            compiler.locals[compiler.local_count - 1].depth > compiler.scope_depth)
+            compiler.locals[compiler.local_count - 1].depth > scope_depth)
         {
             compiler.emitByte(OpCode.op_pop.u8());
             compiler.local_count -= 1;
@@ -163,7 +201,7 @@ pub const Compiler = struct {
 
     fn binary(compiler: *Compiler, can_assign: bool) void {
         _ = can_assign;
-        const operatorType = compiler.parser.previous.type;
+        const operatorType = parser.previous.type;
         const rule = getRule(operatorType);
         compiler.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
@@ -184,9 +222,34 @@ pub const Compiler = struct {
         }
     }
 
+    fn argumentList(compiler: *Compiler) u8 {
+        var arg_count: u8 = 0;
+        if (!compiler.check(.token_right_paren)) {
+            while (true) {
+                compiler.expression();
+                if (arg_count == 255) {
+                    compiler.@"error"("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+
+                if (!compiler.match(.token_comma)) break;
+            }
+        }
+        compiler.consume(.token_right_paren, "Expect ')' after arguments.");
+
+        return arg_count;
+    }
+
+    fn call(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
+
+        const arg_count: u8 = compiler.argumentList();
+        compiler.emitBytes(OpCode.op_call.u8(), @as(u8, @intCast(arg_count)));
+    }
+
     fn literal(compiler: *Compiler, can_assign: bool) void {
         _ = can_assign;
-        switch (compiler.parser.previous.type) {
+        switch (parser.previous.type) {
             .token_nil => compiler.emitByte(OpCode.op_nil.u8()),
             .token_true => compiler.emitByte(OpCode.op_true.u8()),
             .token_false => compiler.emitByte(OpCode.op_false.u8()),
@@ -205,7 +268,7 @@ pub const Compiler = struct {
         _ = can_assign;
         const value = std.fmt.parseFloat(
             f64,
-            compiler.parser.previous.start[0..compiler.parser.previous.length],
+            parser.previous.start[0..parser.previous.length],
         ) catch unreachable;
         compiler.emitConstant(Value.initNumber(value));
     }
@@ -214,7 +277,7 @@ pub const Compiler = struct {
         _ = can_assign;
         const value = zloc.copyString(
             compiler.vm,
-            compiler.parser.previous.start[1 .. compiler.parser.previous.length - 1],
+            parser.previous.start[1 .. parser.previous.length - 1],
         );
         compiler.emitConstant(Value.initObj(value.?));
     }
@@ -242,12 +305,12 @@ pub const Compiler = struct {
     }
 
     fn variable(compiler: *Compiler, can_assign: bool) void {
-        compiler.namedVariable(compiler.parser.previous, can_assign);
+        compiler.namedVariable(parser.previous, can_assign);
     }
 
     fn unary(compiler: *Compiler, can_assign: bool) void {
         _ = can_assign;
-        const operatorType = compiler.parser.previous.type;
+        const operatorType = parser.previous.type;
 
         compiler.parsePrecedence(.prec_unary);
 
@@ -261,16 +324,16 @@ pub const Compiler = struct {
 
     fn parsePrecedence(compiler: *Compiler, precedence: Precedence) void {
         compiler.advance();
-        const prefixRule: ParseFn = getRule(compiler.parser.previous.type).prefix orelse {
+        const prefixRule: ParseFn = getRule(parser.previous.type).prefix orelse {
             compiler.@"error"("Expect expression.");
             return;
         };
 
         const can_assign = @intFromEnum(precedence) <= @intFromEnum(Precedence.prec_assignment);
         prefixRule(compiler, can_assign);
-        while (@intFromEnum(precedence) <= @intFromEnum(getRule(compiler.parser.current.type).precedence)) {
+        while (@intFromEnum(precedence) <= @intFromEnum(getRule(parser.current.type).precedence)) {
             compiler.advance();
-            const infixRule: ParseFn = getRule(compiler.parser.previous.type).infix orelse unreachable;
+            const infixRule: ParseFn = getRule(parser.previous.type).infix orelse unreachable;
             infixRule(compiler, can_assign);
         }
 
@@ -316,14 +379,14 @@ pub const Compiler = struct {
     }
 
     fn declareVariable(compiler: *Compiler) void {
-        if (compiler.scope_depth == 0) return;
+        if (scope_depth == 0) return;
 
-        const name = &compiler.parser.previous;
+        const name = &parser.previous;
         var i = compiler.local_count;
         while (i > 0) {
             i -= 1;
             const local = &compiler.locals[i];
-            if (local.depth != -1 and local.depth < compiler.scope_depth) {
+            if (local.depth != -1 and local.depth < scope_depth) {
                 break;
             }
 
@@ -339,20 +402,20 @@ pub const Compiler = struct {
         compiler.consume(.token_identifier, error_message);
 
         compiler.declareVariable();
-        if (compiler.scope_depth > 0) {
+        if (scope_depth > 0) {
             return 0;
         }
 
-        return compiler.identifierConstant(&compiler.parser.previous);
+        return compiler.identifierConstant(&parser.previous);
     }
 
     fn markInitialized(compiler: *Compiler) void {
-        if (compiler.scope_depth == 0) return;
-        compiler.locals[compiler.local_count - 1].depth = @intCast(compiler.scope_depth);
+        if (scope_depth == 0) return;
+        compiler.locals[compiler.local_count - 1].depth = @intCast(scope_depth);
     }
 
     fn defineVariable(compiler: *Compiler, global: u8) void {
-        if (compiler.scope_depth > 0) {
+        if (scope_depth > 0) {
             compiler.markInitialized();
             return;
         }
@@ -484,10 +547,69 @@ pub const Compiler = struct {
         compiler.endScope();
     }
 
+    fn returnStatement(compiler: *Compiler) void {
+        if (compiler.type == .type_script) {
+            compiler.@"error"("Can't return from top-level code.");
+        }
+
+        if (compiler.match(.token_semicolon)) {
+            compiler.emitReturn();
+        } else {
+            compiler.expression();
+            compiler.consume(.token_semicolon, "Expect ';' after return value.");
+            compiler.emitByte(OpCode.op_return.u8());
+        }
+    }
+
     fn expressionStatement(compiler: *Compiler) void {
         compiler.expression();
         compiler.consume(.token_semicolon, "Expect ';' after expression.");
         compiler.emitByte(OpCode.op_pop.u8());
+    }
+
+    fn compileFunction(compiler: *Compiler, function_type: FunctionType) void {
+        var fun_compiler = Compiler.init(compiler.vm, function_type);
+        fun_compiler.beginScope();
+
+        fun_compiler.consume(.token_left_paren, "Expect '(' after function name.");
+        if (!fun_compiler.check(.token_right_paren)) {
+            while (true) {
+                fun_compiler.function.arity += 1;
+                if (fun_compiler.function.arity > 255) {
+                    compiler.@"error"("Can't have more than 255 parameters.");
+                    break;
+                }
+
+                const constant = fun_compiler.parseVariable("Expect parameter name.");
+                fun_compiler.defineVariable(constant);
+
+                if (!fun_compiler.match(.token_comma)) break;
+            }
+        }
+        fun_compiler.consume(.token_right_paren, "Expect ')' after parameters.");
+        fun_compiler.consume(.token_left_brace, "Expect '{' before function body.");
+        fun_compiler.block();
+
+        fun_compiler.endScope();
+
+        const function = fun_compiler.endCompiler();
+
+        if (function == null) {
+            compiler.@"error"("Cannot compile function: OOM");
+            return;
+        }
+
+        compiler.emitBytes(
+            OpCode.op_constant.u8(),
+            compiler.makeConstant(Value.initObj(function.?)),
+        );
+    }
+
+    fn funDeclaration(compiler: *Compiler) void {
+        const global = compiler.parseVariable("Expect function name.");
+        compiler.markInitialized();
+        compiler.compileFunction(.type_function);
+        compiler.defineVariable(global);
     }
 
     fn varDeclaration(compiler: *Compiler) void {
@@ -504,12 +626,12 @@ pub const Compiler = struct {
     }
 
     fn synchronize(compiler: *Compiler) void {
-        compiler.parser.panic_mode = false;
+        parser.panic_mode = false;
 
-        while (compiler.parser.current.type != .token_eof) {
-            if (compiler.parser.previous.type == .token_semicolon) return;
+        while (parser.current.type != .token_eof) {
+            if (parser.previous.type == .token_semicolon) return;
 
-            switch (compiler.parser.current.type) {
+            switch (parser.current.type) {
                 .token_class,
                 .token_fun,
                 .token_var,
@@ -530,13 +652,15 @@ pub const Compiler = struct {
     }
 
     fn declaration(compiler: *Compiler) void {
-        if (compiler.match(.token_var)) {
+        if (compiler.match(.token_fun)) {
+            compiler.funDeclaration();
+        } else if (compiler.match(.token_var)) {
             compiler.varDeclaration();
         } else {
             compiler.statement();
         }
 
-        if (compiler.parser.panic_mode) compiler.synchronize();
+        if (parser.panic_mode) compiler.synchronize();
     }
 
     fn statement(compiler: *Compiler) void {
@@ -548,6 +672,8 @@ pub const Compiler = struct {
             compiler.whileStatement();
         } else if (compiler.match(.token_for)) {
             compiler.forStatement();
+        } else if (compiler.match(.token_return)) {
+            compiler.returnStatement();
         } else if (compiler.match(.token_left_brace)) {
             compiler.beginScope();
             compiler.block();
@@ -558,10 +684,12 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(compiler: *Compiler) *Chunk {
-        return compiler.compiling_chunk;
+        return &compiler.function.chunk;
     }
 
     fn errorAt(compiler: *Compiler, token: *Token, message: []const u8) void {
+        _ = compiler;
+
         const stderr = utils.getStderrWriter();
         stderr.print("[line {d}] Error", .{token.line}) catch unreachable;
 
@@ -574,15 +702,15 @@ pub const Compiler = struct {
         }
 
         stderr.print(": {s}\n", .{message}) catch unreachable;
-        compiler.parser.had_error = true;
+        parser.had_error = true;
     }
 
     fn @"error"(compiler: *Compiler, message: []const u8) void {
-        compiler.errorAt(&compiler.parser.previous, message);
+        compiler.errorAt(&parser.previous, message);
     }
 
     fn errorAtCurrent(compiler: *Compiler, message: []const u8) void {
-        compiler.errorAt(&compiler.parser.current, message);
+        compiler.errorAt(&parser.current, message);
     }
 };
 
@@ -620,12 +748,17 @@ const Local = struct {
     depth: isize,
 };
 
+const FunctionType = enum {
+    type_function,
+    type_script,
+};
+
 const rules = blk: {
     var tmp: [@typeInfo(TokenType).Enum.fields.len]ParseRule = undefined;
     tmp[TokenType.token_left_paren.u8()] = .{
         .prefix = Compiler.grouping,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.call,
+        .precedence = .prec_call,
     };
     tmp[TokenType.token_right_paren.u8()] = .{
         .prefix = null,

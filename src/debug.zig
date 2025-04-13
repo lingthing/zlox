@@ -15,19 +15,20 @@ pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     while (offset < chunk.count()) {
         offset = disassembleInstruction(chunk, offset);
     }
+    stdout.print("\n", .{}) catch unreachable;
 }
 
 pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     const stdout = utils.getStdoutWriter();
     stdout.print("{:0>4} ", .{offset}) catch unreachable;
 
-    if (offset > 0 and chunk.lines.items[offset] == chunk.lines.items[offset - 1]) {
+    if (offset > 0 and chunk.getLine(offset) == chunk.getLine(offset - 1)) {
         stdout.print("{c:>4} ", .{'|'}) catch unreachable;
     } else {
-        stdout.print("{:>4} ", .{chunk.lines.items[offset]}) catch unreachable;
+        stdout.print("{:>4} ", .{chunk.getLine(offset)}) catch unreachable;
     }
 
-    const instruction = OpCode.from(chunk.get(offset));
+    const instruction = OpCode.from(chunk.getByte(offset));
     switch (instruction) {
         .op_nil,
         .op_true,
@@ -56,6 +57,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         },
         .op_get_local,
         .op_set_local,
+        .op_call,
         => {
             return byteInstruction(instruction.toString(), chunk, offset);
         },
@@ -81,7 +83,7 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
 
 fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const stdout = utils.getStdoutWriter();
-    const constant: u8 = chunk.get(offset + 1);
+    const constant: u8 = chunk.getByte(offset + 1);
     stdout.print("{s:<16} {d:>4} '", .{ name, constant }) catch unreachable;
     zloc.printValue(chunk.constants.items[constant]);
     stdout.print("'\n", .{}) catch unreachable;
@@ -91,7 +93,7 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
 
 fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const stdout = utils.getStdoutWriter();
-    const slot = chunk.get(offset + 1);
+    const slot = chunk.getByte(offset + 1);
     stdout.print("{s:<16} {d:>4}\n", .{ name, slot }) catch unreachable;
 
     return offset + 2;
@@ -99,7 +101,7 @@ fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
 
 fn jumpInstruction(name: []const u8, sign: i8, chunk: *Chunk, offset: usize) usize {
     const stdout = utils.getStdoutWriter();
-    const jump = @as(u16, @as(u16, chunk.get(offset + 1)) << 8 | chunk.get(offset + 2));
+    const jump = @as(u16, @as(u16, chunk.getByte(offset + 1)) << 8 | chunk.getByte(offset + 2));
     stdout.print("{s:<16} {d:>4} -> {d}\n", .{
         name,
         offset,

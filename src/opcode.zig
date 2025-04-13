@@ -22,6 +22,7 @@ pub const OpCode = enum(u8) {
     op_jump,
     op_jump_if_false,
     op_loop,
+    op_call,
     op_return,
 
     pub inline fn from(byte: u8) OpCode {
@@ -57,6 +58,7 @@ pub const OpCode = enum(u8) {
             .op_jump => "OP_JUMP",
             .op_jump_if_false => "OP_JUMP_IF_FALSE",
             .op_loop => "OP_LOOP",
+            .op_call => "OP_CALL",
             .op_return => "OP_RETURN",
         };
     }

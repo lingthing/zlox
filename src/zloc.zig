@@ -12,6 +12,9 @@ pub const TokenType = @import("scanner.zig").TokenType;
 pub const ObjType = @import("object.zig").ObjType;
 pub const Obj = @import("object.zig").Obj;
 pub const ObjString = @import("object.zig").ObjString;
+pub const ObjFunction = @import("object.zig").ObjFunction;
+pub const ObjNative = @import("object.zig").ObjNative;
+pub const NativeFn = @import("object.zig").NativeFn;
 pub const Table = @import("table.zig").Table;
 
 pub const printObject = @import("object.zig").printObject;
@@ -20,6 +23,8 @@ pub const takeString = @import("object.zig").takeString;
 pub const allocateObject = @import("object.zig").allocateObject;
 pub const allocateString = @import("object.zig").allocateString;
 pub const freeObject = @import("object.zig").freeObject;
+pub const newFunction = @import("object.zig").newFunction;
+pub const newNative = @import("object.zig").newNative;
 
 pub fn printValue(value: Value) void {
     const stdout = utils.getStdoutWriter();
