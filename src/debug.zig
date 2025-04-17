@@ -44,6 +44,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_not,
         .op_negate,
         .op_print,
+        .op_close_upvalue,
         .op_return,
         => {
             return simpleInstruction(instruction.toString(), offset);
@@ -57,6 +58,8 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         },
         .op_get_local,
         .op_set_local,
+        .op_get_upvalue,
+        .op_set_upvalue,
         .op_call,
         => {
             return byteInstruction(instruction.toString(), chunk, offset);
@@ -69,6 +72,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_loop,
         => {
             return jumpInstruction(instruction.toString(), -1, chunk, offset);
+        },
+        .op_closure => {
+            return closureInstruction(instruction.toString(), chunk, offset);
         },
     }
 
@@ -89,6 +95,30 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     stdout.print("'\n", .{}) catch unreachable;
 
     return offset + 2;
+}
+
+fn closureInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const stdout = utils.getStdoutWriter();
+    const constant: u8 = chunk.getByte(offset + 1);
+    stdout.print("{s:<16} {d:>4} ", .{ name, constant }) catch unreachable;
+    zloc.printValue(chunk.constants.items[constant]);
+    stdout.print("\n", .{}) catch unreachable;
+
+    const function = chunk.getConstant(constant).asFunction();
+    var new_offset = offset + 2;
+    for (0..function.upvalue_count) |_| {
+        const is_local = chunk.getByte(new_offset) == 1;
+        const index = chunk.getByte(new_offset + 1);
+        stdout.print("{d:0>4}      |                     {s} {d}\n", .{
+            new_offset,
+            if (is_local) "local" else "upvalue",
+            index,
+        }) catch unreachable;
+
+        new_offset += 2;
+    }
+
+    return new_offset;
 }
 
 fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {

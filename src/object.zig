@@ -1,12 +1,18 @@
 pub const ObjType = enum {
+    obj_closure,
     obj_function,
     obj_native,
     obj_string,
+    obj_upvalue,
 };
 
 pub const Obj = struct {
     type: ObjType,
     next: ?*Obj = null,
+
+    pub fn asClosure(self: *Obj) *ObjClosure {
+        return @as(*ObjClosure, @ptrCast(self));
+    }
 
     pub fn asFunction(self: *Obj) *ObjFunction {
         return @as(*ObjFunction, @ptrCast(self));
@@ -19,11 +25,27 @@ pub const Obj = struct {
     pub fn asString(self: *Obj) *ObjString {
         return @as(*ObjString, @ptrCast(self));
     }
+
+    pub fn asUpvalue(self: *Obj) *ObjUpvalue {
+        return @as(*ObjUpvalue, @ptrCast(self));
+    }
+};
+
+pub const ObjClosure = struct {
+    obj: Obj,
+    function: *ObjFunction,
+    upvalues: [*]?*ObjUpvalue,
+    upvalue_count: usize,
+
+    pub fn asObj(self: *ObjClosure) *Obj {
+        return @as(*Obj, @ptrCast(self));
+    }
 };
 
 pub const ObjFunction = struct {
     obj: Obj,
     arity: usize,
+    upvalue_count: usize,
     chunk: Chunk,
     name: ?*ObjString,
 
@@ -49,6 +71,17 @@ pub const ObjString = struct {
     hash: u32,
 
     pub fn asObj(self: *ObjString) *Obj {
+        return @as(*Obj, @ptrCast(self));
+    }
+};
+
+pub const ObjUpvalue = struct {
+    obj: Obj,
+    location: *Value,
+    closed: Value,
+    next: ?*ObjUpvalue,
+
+    pub fn asObj(self: *ObjUpvalue) *Obj {
         return @as(*Obj, @ptrCast(self));
     }
 };
@@ -81,6 +114,9 @@ pub fn printObject(value: Value) void {
     const stdout = utils.getStdoutWriter();
 
     switch (value.objType()) {
+        .obj_closure => {
+            printFunction(value.asClosure().function);
+        },
         .obj_function => {
             printFunction(value.asFunction());
         },
@@ -89,6 +125,9 @@ pub fn printObject(value: Value) void {
         },
         .obj_string => {
             stdout.print("{s}", .{value.asRawString()}) catch unreachable;
+        },
+        .obj_upvalue => {
+            stdout.print("upvalue", .{}) catch unreachable;
         },
     }
 }
@@ -106,9 +145,11 @@ fn printFunction(function: *ObjFunction) void {
 pub fn allocateObject(vm: *VM, comptime obj_type: ObjType) ?*Obj {
     const unknown = vm.gpa.create(comptime blk: {
         switch (obj_type) {
+            .obj_closure => break :blk ObjClosure,
             .obj_function => break :blk ObjFunction,
             .obj_native => break :blk ObjNative,
             .obj_string => break :blk ObjString,
+            .obj_upvalue => break :blk ObjUpvalue,
         }
     }) catch return null;
 
@@ -134,6 +175,11 @@ pub fn allocateString(vm: *VM, chars: []const u8, hash: u32) ?*ObjString {
 
 pub fn freeObject(vm: *VM, obj: *Obj) void {
     switch (obj.type) {
+        .obj_closure => {
+            const closure = obj.asClosure();
+            vm.gpa.free(closure.upvalues[0..closure.upvalue_count]);
+            vm.gpa.destroy(closure);
+        },
         .obj_function => {
             const function = obj.asFunction();
             function.chunk.deinit();
@@ -147,6 +193,10 @@ pub fn freeObject(vm: *VM, obj: *Obj) void {
             const string = obj.asString();
             vm.gpa.free(string.chars);
             vm.gpa.destroy(string);
+        },
+        .obj_upvalue => {
+            const upvalue = obj.asUpvalue();
+            vm.gpa.destroy(upvalue);
         },
     }
 }
@@ -165,6 +215,7 @@ pub fn newFunction(vm: *VM) ?*ObjFunction {
     const object = allocateObject(vm, .obj_function) orelse return null;
     const function = object.asFunction();
     function.arity = 0;
+    function.upvalue_count = 0;
     function.chunk = Chunk.init(vm.gpa);
     function.name = null;
 
@@ -177,6 +228,35 @@ pub fn newNative(vm: *VM, function: NativeFn) ?*ObjNative {
     native.function = function;
 
     return native;
+}
+
+pub fn newClosure(vm: *VM, function: *ObjFunction) ?*ObjClosure {
+    var upvalues = vm.gpa.alloc(?*ObjUpvalue, function.upvalue_count) catch return null;
+    for (0..function.upvalue_count) |i| {
+        upvalues[i] = null;
+    }
+
+    const object: *Obj = allocateObject(vm, .obj_closure) orelse {
+        vm.gpa.free(upvalues);
+
+        return null;
+    };
+    const closure = object.asClosure();
+    closure.function = function;
+    closure.upvalues = upvalues.ptr;
+    closure.upvalue_count = function.upvalue_count;
+
+    return closure;
+}
+
+pub fn newUpvalue(vm: *VM, slot: *Value) ?*ObjUpvalue {
+    const object = allocateObject(vm, .obj_upvalue) orelse return null;
+    const upvalue = object.asUpvalue();
+    upvalue.location = slot;
+    upvalue.closed = Value.initNil();
+    upvalue.next = null;
+
+    return upvalue;
 }
 
 const std = @import("std");

@@ -14,7 +14,9 @@ pub const Obj = @import("object.zig").Obj;
 pub const ObjString = @import("object.zig").ObjString;
 pub const ObjFunction = @import("object.zig").ObjFunction;
 pub const ObjNative = @import("object.zig").ObjNative;
+pub const ObjClosure = @import("object.zig").ObjClosure;
 pub const NativeFn = @import("object.zig").NativeFn;
+pub const ObjUpvalue = @import("object.zig").ObjUpvalue;
 pub const Table = @import("table.zig").Table;
 
 pub const printObject = @import("object.zig").printObject;
@@ -25,6 +27,8 @@ pub const allocateString = @import("object.zig").allocateString;
 pub const freeObject = @import("object.zig").freeObject;
 pub const newFunction = @import("object.zig").newFunction;
 pub const newNative = @import("object.zig").newNative;
+pub const newClosure = @import("object.zig").newClosure;
+pub const newUpvalue = @import("object.zig").newUpvalue;
 
 pub fn printValue(value: Value) void {
     const stdout = utils.getStdoutWriter();

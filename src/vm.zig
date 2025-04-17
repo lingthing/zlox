@@ -9,6 +9,8 @@ const ObjString = zloc.ObjString;
 const ObjFunction = zloc.ObjFunction;
 const ObjNative = zloc.ObjNative;
 const NativeFn = zloc.NativeFn;
+const ObjClosure = zloc.ObjClosure;
+const ObjUpvalue = zloc.ObjUpvalue;
 const Table = zloc.Table;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
@@ -23,7 +25,7 @@ pub const FRAMES_MAX = 64;
 pub const STACK_SIZE = FRAMES_MAX * 256;
 
 const CallFrame = struct {
-    function: *ObjFunction,
+    closure: *ObjClosure,
     ip: [*]u8,
     slots: [*]Value,
 
@@ -43,7 +45,7 @@ const CallFrame = struct {
     }
 
     fn readConstant(frame: *CallFrame) Value {
-        return frame.function.chunk.getConstant(frame.readByte());
+        return frame.closure.function.chunk.getConstant(frame.readByte());
     }
 
     fn readString(frame: *CallFrame) *ObjString {
@@ -82,6 +84,7 @@ pub const VM = struct {
     stack_top: [*]Value,
     globals: Table,
     strings: Table,
+    open_upvalues: ?*ObjUpvalue,
     objects: ?*Obj,
 
     pub fn init(gpa: std.mem.Allocator) VM {
@@ -120,12 +123,15 @@ pub const VM = struct {
     }
 
     pub fn interpret(vm: *VM, source: []const u8) InterpretResult {
-        var compiler = Compiler.init(vm, .type_script);
+        var compiler = Compiler.init(vm, .type_script, null);
         const function = compiler.compile(source) orelse return .compile_error;
 
         vm.resetStack();
         vm.push(Value.initObj(function));
-        _ = vm.call(function, 0);
+        const closure = zloc.newClosure(vm, function).?;
+        _ = vm.pop();
+        vm.push(Value.initObj(closure));
+        _ = vm.call(closure, 0);
 
         return vm.run();
     }
@@ -133,6 +139,7 @@ pub const VM = struct {
     fn resetStack(vm: *VM) void {
         vm.stack_top = vm.stack.ptr;
         vm.frame_count = 0;
+        vm.open_upvalues = null;
     }
 
     fn runtimeError(vm: *VM, comptime fmt: []const u8, args: anytype) void {
@@ -144,7 +151,7 @@ pub const VM = struct {
         while (i > 0) {
             i -= 1;
             const frame = &vm.frames[i];
-            const function = frame.function;
+            const function = frame.closure.function;
             const instruction = @intFromPtr(frame.ip) - @intFromPtr(function.chunk.code.items.ptr) - 1;
             const line = function.chunk.getLine(instruction);
             stderr.print("[line {d}] in ", .{line}) catch unreachable;
@@ -189,8 +196,8 @@ pub const VM = struct {
     fn callValue(vm: *VM, callee: Value, arg_count: u8) bool {
         if (callee.isObj()) {
             switch (callee.objType()) {
-                .obj_function => {
-                    return vm.call(callee.asFunction(), arg_count);
+                .obj_closure => {
+                    return vm.call(callee.asClosure(), arg_count);
                 },
                 .obj_native => {
                     const native = callee.asNative();
@@ -206,13 +213,13 @@ pub const VM = struct {
             }
         }
 
-        vm.runtimeError("Can only call functions or classed.", .{});
+        vm.runtimeError("Can only call functions or classes.", .{});
         return false;
     }
 
-    fn call(vm: *VM, function: *ObjFunction, arg_count: u8) bool {
-        if (arg_count != function.arity) {
-            vm.runtimeError("Expected {d} argument(s), but got {d}.", .{ function.arity, arg_count });
+    fn call(vm: *VM, closure: *ObjClosure, arg_count: u8) bool {
+        if (arg_count != closure.function.arity) {
+            vm.runtimeError("Expected {d} argument(s), but got {d}.", .{ closure.function.arity, arg_count });
 
             return false;
         }
@@ -225,11 +232,45 @@ pub const VM = struct {
 
         var frame = &vm.frames[vm.frame_count];
         vm.frame_count += 1;
-        frame.function = function;
-        frame.ip = function.chunk.code.items.ptr;
+        frame.closure = closure;
+        frame.ip = closure.function.chunk.code.items.ptr;
         frame.slots = vm.stack_top - arg_count - 1;
 
         return true;
+    }
+
+    fn captureUpvalue(vm: *VM, local: *Value) *ObjUpvalue {
+        var prev_upvalue: ?*ObjUpvalue = null;
+        var upvalue = vm.open_upvalues;
+        while (upvalue != null and @intFromPtr(upvalue.?.location) > @intFromPtr(local)) {
+            prev_upvalue = upvalue;
+            upvalue = upvalue.?.next;
+        }
+
+        if (upvalue != null and upvalue.?.location == local) {
+            return upvalue.?;
+        }
+
+        const createdUpvalue = zloc.newUpvalue(vm, local).?;
+        createdUpvalue.next = upvalue;
+        if (prev_upvalue == null) {
+            vm.open_upvalues = createdUpvalue;
+        } else {
+            prev_upvalue.?.next = createdUpvalue;
+        }
+
+        return createdUpvalue;
+    }
+
+    fn closeUpvalues(vm: *VM, last: *Value) void {
+        while (vm.open_upvalues != null and
+            @intFromPtr(vm.open_upvalues.?.location) >= @intFromPtr(last))
+        {
+            const upvalue = vm.open_upvalues;
+            upvalue.?.closed = upvalue.?.location.*;
+            upvalue.?.location = &upvalue.?.closed;
+            vm.open_upvalues = upvalue.?.next;
+        }
     }
 
     fn run(vm: *VM) InterpretResult {
@@ -247,8 +288,8 @@ pub const VM = struct {
                 }
                 stdout.print("\n", .{}) catch unreachable;
                 _ = debug.disassembleInstruction(
-                    &frame.function.chunk,
-                    @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr),
+                    &frame.closure.function.chunk,
+                    @intFromPtr(frame.ip) - @intFromPtr(frame.closure.function.chunk.code.items.ptr),
                 );
             }
 
@@ -301,6 +342,14 @@ pub const VM = struct {
 
                         return .runtime_error;
                     }
+                },
+                .op_get_upvalue => {
+                    const slot = frame.readByte();
+                    vm.push(frame.closure.upvalues[slot].?.location.*);
+                },
+                .op_set_upvalue => {
+                    const slot = frame.readByte();
+                    frame.closure.upvalues[slot].?.location.* = vm.peek(0);
                 },
                 .op_equal => {
                     const b = vm.pop();
@@ -420,8 +469,27 @@ pub const VM = struct {
                     }
                     frame = &vm.frames[vm.frame_count - 1];
                 },
+                .op_closure => {
+                    const function = frame.readConstant().asFunction();
+                    const closure = zloc.newClosure(vm, function).?;
+                    vm.push(Value.initObj(closure));
+                    for (0..closure.upvalue_count) |i| {
+                        const is_local = frame.readByte() == 1;
+                        const index = frame.readByte();
+                        if (is_local) {
+                            closure.upvalues[i] = vm.captureUpvalue(&frame.slots[index]);
+                        } else {
+                            closure.upvalues[i] = frame.closure.upvalues[index];
+                        }
+                    }
+                },
+                .op_close_upvalue => {
+                    vm.closeUpvalues(&(vm.stack_top - 1)[0]);
+                    _ = vm.pop();
+                },
                 .op_return => {
                     const result = vm.pop();
+                    vm.closeUpvalues(&frame.slots[0]);
                     vm.frame_count -= 1;
                     if (vm.frame_count == 0) {
                         _ = vm.pop();

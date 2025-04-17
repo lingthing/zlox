@@ -72,6 +72,10 @@ pub const Value = struct {
         return value.isObj() and value.objType() == obj_type;
     }
 
+    pub fn isClosure(value: Value) bool {
+        return value.isObjType(.obj_closure);
+    }
+
     pub fn isFunction(value: Value) bool {
         return value.isObjType(.obj_function);
     }
@@ -94,6 +98,10 @@ pub const Value = struct {
 
     pub fn asObj(value: Value) *Obj {
         return value.as.obj;
+    }
+
+    pub fn asClosure(value: Value) *ObjClosure {
+        return @alignCast(@ptrCast(value.as.obj));
     }
 
     pub fn asFunction(value: Value) *ObjFunction {
@@ -135,3 +143,4 @@ const Obj = zloc.Obj;
 const ObjString = zloc.ObjString;
 const ObjFunction = zloc.ObjFunction;
 const ObjNative = zloc.ObjNative;
+const ObjClosure = zloc.ObjClosure;

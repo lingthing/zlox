@@ -9,6 +9,8 @@ pub const OpCode = enum(u8) {
     op_get_global,
     op_define_global,
     op_set_global,
+    op_get_upvalue,
+    op_set_upvalue,
     op_equal,
     op_greater,
     op_less,
@@ -23,6 +25,8 @@ pub const OpCode = enum(u8) {
     op_jump_if_false,
     op_loop,
     op_call,
+    op_closure,
+    op_close_upvalue,
     op_return,
 
     pub inline fn from(byte: u8) OpCode {
@@ -45,6 +49,8 @@ pub const OpCode = enum(u8) {
             .op_get_global => "OP_GET_GLOBAL",
             .op_define_global => "OP_DEFINE_GLOBAL",
             .op_set_global => "OP_SET_GLOBAL",
+            .op_get_upvalue => "OP_GET_UPVALUE",
+            .op_set_upvalue => "OP_SET_UPVALUE",
             .op_equal => "OP_EQUAL",
             .op_greater => "OP_GREATER",
             .op_less => "OP_LESS",
@@ -59,6 +65,8 @@ pub const OpCode = enum(u8) {
             .op_jump_if_false => "OP_JUMP_IF_FALSE",
             .op_loop => "OP_LOOP",
             .op_call => "OP_CALL",
+            .op_closure => "OP_CLOSURE",
+            .op_close_upvalue => "OP_CLOSE_UPVALUE",
             .op_return => "OP_RETURN",
         };
     }

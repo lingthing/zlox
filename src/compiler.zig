@@ -16,6 +16,7 @@ pub const Compiler = struct {
     var parser: Parser = undefined;
     var scope_depth: usize = 0;
 
+    enclosing: ?*Compiler,
     vm: *VM,
 
     function: *ObjFunction,
@@ -24,14 +25,11 @@ pub const Compiler = struct {
     locals: [std.math.maxInt(u8) + 1]Local,
     local_count: usize,
 
-    const FunctionCompiler = struct {
-        compiler: *Compiler,
-        function: *ObjFunction,
-        type: FunctionType,
-    };
+    upvalues: [std.math.maxInt(u8) + 1]Upvalue,
 
-    pub fn init(vm: *VM, function_type: FunctionType) Compiler {
+    pub fn init(vm: *VM, function_type: FunctionType, enclosing: ?*Compiler) Compiler {
         var compiler = Compiler{
+            .enclosing = enclosing,
             .vm = vm,
 
             .function = zloc.newFunction(vm).?,
@@ -39,6 +37,8 @@ pub const Compiler = struct {
 
             .locals = undefined,
             .local_count = 0,
+
+            .upvalues = undefined,
         };
 
         if (function_type != .type_script) {
@@ -51,6 +51,7 @@ pub const Compiler = struct {
         var local = &compiler.locals[0];
         compiler.local_count += 1;
         local.depth = 0;
+        local.is_captured = false;
         local.name.start = "";
         local.name.length = 0;
 
@@ -194,7 +195,11 @@ pub const Compiler = struct {
         while (compiler.local_count > 0 and
             compiler.locals[compiler.local_count - 1].depth > scope_depth)
         {
-            compiler.emitByte(OpCode.op_pop.u8());
+            if (compiler.locals[compiler.local_count - 1].is_captured) {
+                compiler.emitByte(OpCode.op_close_upvalue.u8());
+            } else {
+                compiler.emitByte(OpCode.op_pop.u8());
+            }
             compiler.local_count -= 1;
         }
     }
@@ -291,9 +296,15 @@ pub const Compiler = struct {
             get_op = OpCode.op_get_local.u8();
             set_op = OpCode.op_set_local.u8();
         } else {
-            arg = compiler.identifierConstant(&mut_name);
-            get_op = OpCode.op_get_global.u8();
-            set_op = OpCode.op_set_global.u8();
+            arg = compiler.resolveUpvalue(&mut_name);
+            if (arg != -1) {
+                get_op = OpCode.op_get_upvalue.u8();
+                set_op = OpCode.op_set_upvalue.u8();
+            } else {
+                arg = compiler.identifierConstant(&mut_name);
+                get_op = OpCode.op_get_global.u8();
+                set_op = OpCode.op_set_global.u8();
+            }
         }
 
         if (can_assign and compiler.match(.token_equal)) {
@@ -365,6 +376,46 @@ pub const Compiler = struct {
         return -1;
     }
 
+    fn addUpvalue(compiler: *Compiler, index: u8, is_local: bool) isize {
+        const upvalue_count = compiler.function.upvalue_count;
+        for (0..upvalue_count) |i| {
+            const upvalue = &compiler.upvalues[i];
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+
+        if (upvalue_count == compiler.upvalues.len) {
+            compiler.@"error"("Too many closure variables in function.");
+
+            return 0;
+        }
+
+        compiler.upvalues[upvalue_count].is_local = is_local;
+        compiler.upvalues[upvalue_count].index = index;
+
+        compiler.function.upvalue_count += 1;
+
+        return @intCast(upvalue_count);
+    }
+
+    fn resolveUpvalue(compiler: *Compiler, name: *Token) isize {
+        if (compiler.enclosing) |enclosing| {
+            const local = enclosing.resolveLocal(name);
+            if (local != -1) {
+                enclosing.locals[@as(usize, @intCast(local))].is_captured = true;
+                return compiler.addUpvalue(@as(u8, @intCast(local)), true);
+            }
+
+            const upvalue = enclosing.resolveUpvalue(name);
+            if (upvalue != -1) {
+                return compiler.addUpvalue(@as(u8, @intCast(upvalue)), false);
+            }
+        }
+
+        return -1;
+    }
+
     fn addLocal(compiler: *Compiler, name: Token) void {
         if (compiler.local_count == compiler.locals.len) {
             compiler.@"error"("Too many local variables in function.");
@@ -376,6 +427,7 @@ pub const Compiler = struct {
 
         local.name = name;
         local.depth = -1; // -1 represent variable uninitialized
+        local.is_captured = false;
     }
 
     fn declareVariable(compiler: *Compiler) void {
@@ -568,7 +620,7 @@ pub const Compiler = struct {
     }
 
     fn compileFunction(compiler: *Compiler, function_type: FunctionType) void {
-        var fun_compiler = Compiler.init(compiler.vm, function_type);
+        var fun_compiler = Compiler.init(compiler.vm, function_type, compiler);
         fun_compiler.beginScope();
 
         fun_compiler.consume(.token_left_paren, "Expect '(' after function name.");
@@ -600,9 +652,13 @@ pub const Compiler = struct {
         }
 
         compiler.emitBytes(
-            OpCode.op_constant.u8(),
+            OpCode.op_closure.u8(),
             compiler.makeConstant(Value.initObj(function.?)),
         );
+        for (0..function.?.upvalue_count) |i| {
+            compiler.emitByte(@intFromBool(fun_compiler.upvalues[i].is_local));
+            compiler.emitByte(fun_compiler.upvalues[i].index);
+        }
     }
 
     fn funDeclaration(compiler: *Compiler) void {
@@ -746,6 +802,12 @@ const ParseRule = struct {
 const Local = struct {
     name: Token,
     depth: isize,
+    is_captured: bool,
+};
+
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
 };
 
 const FunctionType = enum {
