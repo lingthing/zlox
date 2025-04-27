@@ -12,6 +12,7 @@ const NativeFn = zloc.NativeFn;
 const ObjClosure = zloc.ObjClosure;
 const ObjUpvalue = zloc.ObjUpvalue;
 const Table = zloc.Table;
+const MemoryManager = @import("memory.zig").MemoryManager;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
 
@@ -77,7 +78,9 @@ fn fibNative(args: []Value) Value {
 }
 
 pub const VM = struct {
-    gpa: std.mem.Allocator,
+    gpa: std.mem.Allocator, // raw
+    allocator: std.mem.Allocator, // normal
+    memory_manager: *MemoryManager,
     frames: [FRAMES_MAX]CallFrame,
     frame_count: usize,
     stack: []Value,
@@ -87,15 +90,27 @@ pub const VM = struct {
     open_upvalues: ?*ObjUpvalue,
     objects: ?*Obj,
 
-    pub fn init(gpa: std.mem.Allocator) VM {
-        var vm: VM = undefined;
+    bytes_allocated: usize,
+    next_gc: usize,
+    gray_stack: std.ArrayList(*Obj),
+
+    pub fn init(gpa: std.mem.Allocator) *VM {
+        var vm: *VM = gpa.create(VM) catch unreachable;
         vm.gpa = gpa;
+        vm.memory_manager = gpa.create(MemoryManager) catch unreachable;
+        vm.memory_manager.* = MemoryManager.init(vm, gpa);
+        vm.allocator = vm.memory_manager.allocator();
+
         vm.stack = gpa.alloc(Value, STACK_SIZE) catch unreachable;
         vm.resetStack();
 
         vm.objects = null;
         vm.globals = Table.init();
         vm.strings = Table.init();
+
+        vm.bytes_allocated = 0;
+        vm.next_gc = 1024 * 1024;
+        vm.gray_stack = std.ArrayList(*Obj).init(gpa);
 
         vm.defineNative("clock", clockNative);
         vm.defineNative("exit", exitNative);
@@ -109,14 +124,20 @@ pub const VM = struct {
         vm.strings.deinit();
         vm.freeObjects();
         vm.gpa.free(vm.stack);
+
+        vm.memory_manager.deinit();
+        vm.gpa.destroy(vm.memory_manager);
+
+        vm.gray_stack.deinit();
+        vm.gpa.destroy(vm);
     }
 
     fn freeObjects(vm: *VM) void {
-        var object = vm.objects;
-        while (object != null) {
-            const next = object.?.next;
-            zloc.freeObject(vm, object.?);
-            object = next;
+        var it = vm.objects;
+        while (it) |object| {
+            const next = object.next;
+            zloc.freeObject(vm, object);
+            it = next;
         }
 
         vm.objects = null;
@@ -124,6 +145,7 @@ pub const VM = struct {
 
     pub fn interpret(vm: *VM, source: []const u8) InterpretResult {
         var compiler = Compiler.init(vm, .type_script, null);
+        Compiler.current = &compiler;
         const function = compiler.compile(source) orelse return .compile_error;
 
         vm.resetStack();
@@ -174,22 +196,22 @@ pub const VM = struct {
         _ = vm.pop();
     }
 
-    fn push(vm: *VM, value: Value) void {
+    pub fn push(vm: *VM, value: Value) void {
         vm.stack_top[0] = value;
         vm.stack_top += 1;
     }
 
-    fn pop(vm: *VM) Value {
+    pub fn pop(vm: *VM) Value {
         vm.stack_top -= 1;
 
         return vm.stack_top[0];
     }
 
-    fn peek(vm: *VM, distance: usize) Value {
+    pub fn peek(vm: *VM, distance: usize) Value {
         return (vm.stack_top - 1 - distance)[0];
     }
 
-    fn top(vm: *VM) *Value {
+    pub fn top(vm: *VM) *Value {
         return @ptrCast(vm.stack_top - 1);
     }
 
@@ -378,16 +400,19 @@ pub const VM = struct {
                 },
                 .op_add => {
                     if (vm.peek(0).isString() and vm.peek(1).isString()) {
-                        const b = vm.pop().asRawString();
-                        const a = vm.pop().asRawString();
+                        const b = vm.peek(0).asRawString();
+                        const a = vm.peek(1).asRawString();
 
                         const length = a.len + b.len;
-                        var chars = vm.gpa.alloc(u8, length) catch {
+                        var chars = vm.allocator.alloc(u8, length) catch {
                             // TODO: handle memory not enough
-                            unreachable;
+                            @panic("OOM");
                         };
                         std.mem.copyForwards(u8, chars[0..a.len], a);
                         std.mem.copyForwards(u8, chars[a.len..], b);
+
+                        _ = vm.pop(); // pop b
+                        _ = vm.pop(); // pop a
                         vm.push(Value.initObj(zloc.takeString(vm, chars).?));
                     } else if (vm.peek(0).isNumber() and vm.peek(1).isNumber()) {
                         const b = vm.pop().asNumber();

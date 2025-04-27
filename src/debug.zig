@@ -6,6 +6,8 @@ const OpCode = zloc.OpCode;
 
 pub const DEBUG_PRINT_CODE = true and builtin.mode == .Debug;
 pub const DEBUG_TRACE_EXECUTION = false and builtin.mode == .Debug;
+pub const DEBUG_STRESS_GC = false;
+pub const DEBUG_LOG_GC = false and builtin.mode == .Debug;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     const stdout = utils.getStdoutWriter();

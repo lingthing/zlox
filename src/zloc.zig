@@ -29,6 +29,7 @@ pub const newFunction = @import("object.zig").newFunction;
 pub const newNative = @import("object.zig").newNative;
 pub const newClosure = @import("object.zig").newClosure;
 pub const newUpvalue = @import("object.zig").newUpvalue;
+pub const collectGarbage = @import("gc.zig").collectGarbage;
 
 pub fn printValue(value: Value) void {
     const stdout = utils.getStdoutWriter();

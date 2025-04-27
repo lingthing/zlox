@@ -41,7 +41,9 @@ fn repl() void {
         }
         if (line.len == 0) continue;
 
-        if (mem.eql(u8, line, "clear")) {
+        if (mem.eql(u8, line, "quit")) {
+            break;
+        } else if (mem.eql(u8, line, "clear")) {
             stdout.print("\x1b[H\x1b[2J", .{}) catch unreachable;
             continue;
         }

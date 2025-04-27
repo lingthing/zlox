@@ -2,6 +2,7 @@ const std = @import("std");
 const zloc = @import("zloc.zig");
 const OpCode = zloc.OpCode;
 const Value = zloc.Value;
+const VM = zloc.VM;
 
 pub const Chunk = struct {
     code: std.ArrayList(u8),
@@ -9,7 +10,7 @@ pub const Chunk = struct {
     constants: zloc.ValueArray,
 
     pub fn init(allocator: std.mem.Allocator) Chunk {
-        return Chunk{
+        return .{
             .code = std.ArrayList(u8).init(allocator),
             .lines = std.ArrayList(u32).init(allocator),
             .constants = zloc.ValueArray.init(allocator),
@@ -27,8 +28,10 @@ pub const Chunk = struct {
         self.lines.append(line) catch @panic("OOM");
     }
 
-    pub fn addConstant(self: *Chunk, value: Value) usize {
+    pub fn addConstant(self: *Chunk, value: Value, vm: *VM) usize {
+        vm.push(value);
         self.constants.append(value) catch @panic("OOM");
+        _ = vm.pop();
         return self.constants.items.len - 1;
     }
 

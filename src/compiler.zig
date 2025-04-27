@@ -15,6 +15,7 @@ pub const Compiler = struct {
     var scanner: Scanner = undefined;
     var parser: Parser = undefined;
     var scope_depth: usize = 0;
+    pub var current: ?*Compiler = null;
 
     enclosing: ?*Compiler,
     vm: *VM,
@@ -40,6 +41,8 @@ pub const Compiler = struct {
 
             .upvalues = undefined,
         };
+
+        current = &compiler;
 
         if (function_type != .type_script) {
             compiler.function.name = zloc.copyString(
@@ -144,7 +147,7 @@ pub const Compiler = struct {
     }
 
     fn makeConstant(compiler: *Compiler, value: Value) u8 {
-        const constant = compiler.currentChunk().addConstant(value);
+        const constant = compiler.currentChunk().addConstant(value, compiler.vm);
         if (constant > std.math.maxInt(u8)) {
             compiler.@"error"("Too many constants in one chunk.");
             return 0;
@@ -180,6 +183,8 @@ pub const Compiler = struct {
                 );
             }
         }
+
+        Compiler.current = compiler.enclosing;
 
         return function;
     }
@@ -621,6 +626,7 @@ pub const Compiler = struct {
 
     fn compileFunction(compiler: *Compiler, function_type: FunctionType) void {
         var fun_compiler = Compiler.init(compiler.vm, function_type, compiler);
+        Compiler.current = &fun_compiler;
         fun_compiler.beginScope();
 
         fun_compiler.consume(.token_left_paren, "Expect '(' after function name.");

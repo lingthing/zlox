@@ -42,8 +42,10 @@ pub const Value = struct {
         if (typeInfo.Pointer.size != .One) {
             @compileError("Value.initObj() only supports a one pointer");
         }
-        if (@typeInfo(typeInfo.Pointer.child).Struct.fields[0].type != Obj) {
-            @compileError("Value.initObj() expects a pointer to struct with Obj as first field");
+        if (@typeInfo(typeInfo.Pointer.child).Struct.fields[0].type != Obj and
+            @TypeOf(value) != *Obj)
+        {
+            @compileError("Value.initObj() expects a pointer to struct with Obj as first field or a pointer to Obj");
         }
 
         return .{

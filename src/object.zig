@@ -4,10 +4,21 @@ pub const ObjType = enum {
     obj_native,
     obj_string,
     obj_upvalue,
+
+    pub fn toString(obj_type: ObjType) []const u8 {
+        return switch (obj_type) {
+            .obj_closure => "ObjClosure",
+            .obj_function => "ObjFunction",
+            .obj_native => "ObjNative",
+            .obj_string => "ObjString",
+            .obj_upvalue => "ObjUpvalue",
+        };
+    }
 };
 
 pub const Obj = struct {
     type: ObjType,
+    is_marked: bool,
     next: ?*Obj = null,
 
     pub fn asClosure(self: *Obj) *ObjClosure {
@@ -93,7 +104,7 @@ pub fn copyString(vm: *VM, chars: []const u8) ?*ObjString {
         return interned;
     }
 
-    const new_chars = vm.gpa.dupe(u8, chars) catch return null;
+    const new_chars = vm.allocator.dupe(u8, chars) catch return null;
 
     return allocateString(vm, new_chars, hash);
 }
@@ -102,7 +113,7 @@ pub fn takeString(vm: *VM, chars: []const u8) ?*ObjString {
     const hash = hashString(chars);
     const interned = vm.strings.findString(chars, hash);
     if (interned != null) {
-        vm.gpa.free(chars);
+        vm.allocator.free(chars);
 
         return interned;
     }
@@ -139,11 +150,15 @@ fn printFunction(function: *ObjFunction) void {
         return;
     }
 
-    stdout.print("<fn {s}>", .{function.name.?.chars}) catch unreachable;
+    if (function.name) |name| {
+        stdout.print("<fn {s}>", .{name.chars}) catch unreachable;
+    } else {
+        stdout.print("<fn <null>>", .{}) catch unreachable;
+    }
 }
 
 pub fn allocateObject(vm: *VM, comptime obj_type: ObjType) ?*Obj {
-    const unknown = vm.gpa.create(comptime blk: {
+    const unknown = vm.allocator.create(comptime blk: {
         switch (obj_type) {
             .obj_closure => break :blk ObjClosure,
             .obj_function => break :blk ObjFunction,
@@ -155,9 +170,18 @@ pub fn allocateObject(vm: *VM, comptime obj_type: ObjType) ?*Obj {
 
     var object = unknown.asObj();
     object.type = obj_type;
+    object.is_marked = false;
 
     object.next = vm.objects;
     vm.objects = object;
+
+    if (debug.DEBUG_LOG_GC) {
+        std.debug.print("{s}@{x} allocate {d} byte(s)\n", .{
+            object.type.toString(),
+            @intFromPtr(unknown),
+            @sizeOf(@TypeOf(unknown.*)),
+        });
+    }
 
     return object;
 }
@@ -168,35 +192,44 @@ pub fn allocateString(vm: *VM, chars: []const u8, hash: u32) ?*ObjString {
     string.chars = @constCast(chars);
     string.hash = hash;
 
+    vm.push(Value.initObj(string));
     _ = vm.strings.set(string, Value.initNil());
+    _ = vm.pop();
 
     return string;
 }
 
 pub fn freeObject(vm: *VM, obj: *Obj) void {
+    if (debug.DEBUG_LOG_GC) {
+        std.debug.print("{s}@{x} free\n", .{
+            obj.type.toString(),
+            @intFromPtr(obj),
+        });
+    }
+
     switch (obj.type) {
         .obj_closure => {
             const closure = obj.asClosure();
-            vm.gpa.free(closure.upvalues[0..closure.upvalue_count]);
-            vm.gpa.destroy(closure);
+            vm.allocator.free(closure.upvalues[0..closure.upvalue_count]);
+            vm.allocator.destroy(closure);
         },
         .obj_function => {
             const function = obj.asFunction();
             function.chunk.deinit();
-            vm.gpa.destroy(function);
+            vm.allocator.destroy(function);
         },
         .obj_native => {
             const native = obj.asNative();
-            vm.gpa.destroy(native);
+            vm.allocator.destroy(native);
         },
         .obj_string => {
             const string = obj.asString();
-            vm.gpa.free(string.chars);
-            vm.gpa.destroy(string);
+            vm.allocator.free(string.chars);
+            vm.allocator.destroy(string);
         },
         .obj_upvalue => {
             const upvalue = obj.asUpvalue();
-            vm.gpa.destroy(upvalue);
+            vm.allocator.destroy(upvalue);
         },
     }
 }
@@ -216,7 +249,7 @@ pub fn newFunction(vm: *VM) ?*ObjFunction {
     const function = object.asFunction();
     function.arity = 0;
     function.upvalue_count = 0;
-    function.chunk = Chunk.init(vm.gpa);
+    function.chunk = Chunk.init(vm.allocator);
     function.name = null;
 
     return function;
@@ -231,13 +264,13 @@ pub fn newNative(vm: *VM, function: NativeFn) ?*ObjNative {
 }
 
 pub fn newClosure(vm: *VM, function: *ObjFunction) ?*ObjClosure {
-    var upvalues = vm.gpa.alloc(?*ObjUpvalue, function.upvalue_count) catch return null;
+    var upvalues = vm.allocator.alloc(?*ObjUpvalue, function.upvalue_count) catch return null;
     for (0..function.upvalue_count) |i| {
         upvalues[i] = null;
     }
 
     const object: *Obj = allocateObject(vm, .obj_closure) orelse {
-        vm.gpa.free(upvalues);
+        vm.allocator.free(upvalues);
 
         return null;
     };
@@ -261,6 +294,7 @@ pub fn newUpvalue(vm: *VM, slot: *Value) ?*ObjUpvalue {
 
 const std = @import("std");
 const zloc = @import("zloc.zig");
+const debug = @import("debug.zig");
 const utils = @import("utils.zig");
 const Value = zloc.Value;
 const Chunk = zloc.Chunk;
