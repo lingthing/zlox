@@ -257,6 +257,18 @@ pub const Compiler = struct {
         compiler.emitBytes(OpCode.op_call.u8(), @as(u8, @intCast(arg_count)));
     }
 
+    fn dot(compiler: *Compiler, can_assign: bool) void {
+        compiler.consume(.token_identifier, "Expect property name after '.'.");
+        const name_constant = compiler.identifierConstant(&parser.previous);
+
+        if (can_assign and compiler.match(.token_equal)) {
+            compiler.expression();
+            compiler.emitBytes(OpCode.op_set_property.u8(), name_constant);
+        } else {
+            compiler.emitBytes(OpCode.op_get_property.u8(), name_constant);
+        }
+    }
+
     fn literal(compiler: *Compiler, can_assign: bool) void {
         _ = can_assign;
         switch (parser.previous.type) {
@@ -624,6 +636,19 @@ pub const Compiler = struct {
         compiler.emitByte(OpCode.op_pop.u8());
     }
 
+    fn classDeclaration(compiler: *Compiler) void {
+        compiler.consume(.token_identifier, "Expect class name.");
+
+        const name_constant = compiler.identifierConstant(&parser.previous);
+        compiler.declareVariable();
+
+        compiler.emitBytes(OpCode.op_class.u8(), name_constant);
+        compiler.defineVariable(name_constant);
+
+        compiler.consume(.token_left_brace, "Expect '{' before class body.");
+        compiler.consume(.token_right_brace, "Expect '}' after class body.");
+    }
+
     fn compileFunction(compiler: *Compiler, function_type: FunctionType) void {
         var fun_compiler = Compiler.init(compiler.vm, function_type, compiler);
         Compiler.current = &fun_compiler;
@@ -714,7 +739,9 @@ pub const Compiler = struct {
     }
 
     fn declaration(compiler: *Compiler) void {
-        if (compiler.match(.token_fun)) {
+        if (compiler.match(.token_class)) {
+            compiler.classDeclaration();
+        } else if (compiler.match(.token_fun)) {
             compiler.funDeclaration();
         } else if (compiler.match(.token_var)) {
             compiler.varDeclaration();
@@ -850,8 +877,8 @@ const rules = blk: {
     };
     tmp[TokenType.token_dot.u8()] = .{
         .prefix = null,
-        .infix = null,
-        .precedence = .prec_none,
+        .infix = Compiler.dot,
+        .precedence = .prec_call,
     };
     tmp[TokenType.token_minus.u8()] = .{
         .prefix = Compiler.unary,

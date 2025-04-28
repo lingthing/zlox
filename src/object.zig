@@ -1,4 +1,6 @@
 pub const ObjType = enum {
+    obj_class,
+    obj_instance,
     obj_closure,
     obj_function,
     obj_native,
@@ -7,6 +9,8 @@ pub const ObjType = enum {
 
     pub fn toString(obj_type: ObjType) []const u8 {
         return switch (obj_type) {
+            .obj_class => "ObjClass",
+            .obj_instance => "ObjInstance",
             .obj_closure => "ObjClosure",
             .obj_function => "ObjFunction",
             .obj_native => "ObjNative",
@@ -20,6 +24,14 @@ pub const Obj = struct {
     type: ObjType,
     is_marked: bool,
     next: ?*Obj = null,
+
+    pub fn asClass(self: *Obj) *ObjClass {
+        return @as(*ObjClass, @ptrCast(self));
+    }
+
+    pub fn asInstance(self: *Obj) *ObjInstance {
+        return @as(*ObjInstance, @ptrCast(self));
+    }
 
     pub fn asClosure(self: *Obj) *ObjClosure {
         return @as(*ObjClosure, @ptrCast(self));
@@ -39,6 +51,25 @@ pub const Obj = struct {
 
     pub fn asUpvalue(self: *Obj) *ObjUpvalue {
         return @as(*ObjUpvalue, @ptrCast(self));
+    }
+};
+
+pub const ObjClass = struct {
+    obj: Obj,
+    name: *ObjString,
+
+    pub fn asObj(self: *ObjClass) *Obj {
+        return @as(*Obj, @ptrCast(self));
+    }
+};
+
+pub const ObjInstance = struct {
+    obj: Obj,
+    class: *ObjClass,
+    fields: Table,
+
+    pub fn asObj(self: *ObjInstance) *Obj {
+        return @as(*Obj, @ptrCast(self));
     }
 };
 
@@ -125,6 +156,12 @@ pub fn printObject(value: Value) void {
     const stdout = utils.getStdoutWriter();
 
     switch (value.objType()) {
+        .obj_class => {
+            stdout.print("{s}", .{value.asClass().name.chars}) catch unreachable;
+        },
+        .obj_instance => {
+            stdout.print("{s} instance", .{value.asInstance().class.name.chars}) catch unreachable;
+        },
         .obj_closure => {
             printFunction(value.asClosure().function);
         },
@@ -160,6 +197,8 @@ fn printFunction(function: *ObjFunction) void {
 pub fn allocateObject(vm: *VM, comptime obj_type: ObjType) ?*Obj {
     const unknown = vm.allocator.create(comptime blk: {
         switch (obj_type) {
+            .obj_class => break :blk ObjClass,
+            .obj_instance => break :blk ObjInstance,
             .obj_closure => break :blk ObjClosure,
             .obj_function => break :blk ObjFunction,
             .obj_native => break :blk ObjNative,
@@ -208,6 +247,15 @@ pub fn freeObject(vm: *VM, obj: *Obj) void {
     }
 
     switch (obj.type) {
+        .obj_class => {
+            const class = obj.asClass();
+            vm.allocator.destroy(class);
+        },
+        .obj_instance => {
+            const instance = obj.asInstance();
+            instance.fields.deinit();
+            vm.allocator.destroy(instance);
+        },
         .obj_closure => {
             const closure = obj.asClosure();
             vm.allocator.free(closure.upvalues[0..closure.upvalue_count]);
@@ -292,6 +340,23 @@ pub fn newUpvalue(vm: *VM, slot: *Value) ?*ObjUpvalue {
     return upvalue;
 }
 
+pub fn newClass(vm: *VM, name: *ObjString) ?*ObjClass {
+    const object = allocateObject(vm, .obj_class) orelse return null;
+    const class = object.asClass();
+    class.name = name;
+
+    return class;
+}
+
+pub fn newInstance(vm: *VM, class: *ObjClass) ?*ObjInstance {
+    const object = allocateObject(vm, .obj_instance) orelse return null;
+    const instance = object.asInstance();
+    instance.class = class;
+    instance.fields = Table.init();
+
+    return instance;
+}
+
 const std = @import("std");
 const zloc = @import("zloc.zig");
 const debug = @import("debug.zig");
@@ -299,3 +364,4 @@ const utils = @import("utils.zig");
 const Value = zloc.Value;
 const Chunk = zloc.Chunk;
 const VM = zloc.VM;
+const Table = zloc.Table;

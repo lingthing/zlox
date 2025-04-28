@@ -218,6 +218,12 @@ pub const VM = struct {
     fn callValue(vm: *VM, callee: Value, arg_count: u8) bool {
         if (callee.isObj()) {
             switch (callee.objType()) {
+                .obj_class => {
+                    const class = callee.asClass();
+                    (vm.stack_top - arg_count - 1)[0] = Value.initObj(zloc.newInstance(vm, class).?);
+
+                    return true;
+                },
                 .obj_closure => {
                     return vm.call(callee.asClosure(), arg_count);
                 },
@@ -373,6 +379,41 @@ pub const VM = struct {
                     const slot = frame.readByte();
                     frame.closure.upvalues[slot].?.location.* = vm.peek(0);
                 },
+                .op_get_property => {
+                    if (!vm.peek(0).isInstance()) {
+                        vm.runtimeError("Only instances have fields.", .{});
+
+                        return .runtime_error;
+                    }
+
+                    const instance = vm.peek(0).asInstance();
+                    const name = frame.readString();
+
+                    var value: Value = undefined;
+                    if (instance.fields.get(name, &value)) {
+                        _ = vm.pop(); // pop the instance
+                        vm.push(value);
+                        continue;
+                    }
+
+                    vm.runtimeError("Undefined property '{s}'.", .{name.chars});
+
+                    return .runtime_error;
+                },
+                .op_set_property => {
+                    if (!vm.peek(1).isInstance()) {
+                        vm.runtimeError("Only instances have fields.", .{});
+
+                        return .runtime_error;
+                    }
+
+                    const instance = vm.peek(1).asInstance();
+                    const name = frame.readString();
+                    _ = instance.fields.set(name, vm.peek(0));
+                    const value = vm.pop(); // pop the value
+                    _ = vm.pop(); // pop the instance
+                    vm.push(value);
+                },
                 .op_equal => {
                     const b = vm.pop();
                     const a = vm.pop();
@@ -525,6 +566,10 @@ pub const VM = struct {
                     vm.stack_top = frame.slots;
                     vm.push(result);
                     frame = &vm.frames[vm.frame_count - 1];
+                },
+                .op_class => {
+                    const name = frame.readString();
+                    vm.push(Value.initObj(zloc.newClass(vm, name).?));
                 },
             }
         }

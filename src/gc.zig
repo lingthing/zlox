@@ -135,6 +135,15 @@ fn blackenObject(vm: *VM, object: *Obj) void {
     }
 
     switch (object.type) {
+        .obj_class => {
+            const class = object.asClass();
+            markObject(vm, class.name.asObj());
+        },
+        .obj_instance => {
+            const instance = object.asInstance();
+            markObject(vm, instance.class.asObj());
+            markTable(vm, &instance.fields);
+        },
         .obj_upvalue => {
             const upvalue = object.asUpvalue();
             markValue(vm, upvalue.closed);

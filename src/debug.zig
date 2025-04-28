@@ -55,6 +55,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_get_global,
         .op_define_global,
         .op_set_global,
+        .op_class,
+        .op_get_property,
+        .op_set_property,
         => {
             return constantInstruction(instruction.toString(), chunk, offset);
         },

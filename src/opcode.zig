@@ -11,6 +11,8 @@ pub const OpCode = enum(u8) {
     op_set_global,
     op_get_upvalue,
     op_set_upvalue,
+    op_get_property,
+    op_set_property,
     op_equal,
     op_greater,
     op_less,
@@ -28,6 +30,7 @@ pub const OpCode = enum(u8) {
     op_closure,
     op_close_upvalue,
     op_return,
+    op_class,
 
     pub inline fn from(byte: u8) OpCode {
         return @enumFromInt(byte);
@@ -51,6 +54,8 @@ pub const OpCode = enum(u8) {
             .op_set_global => "OP_SET_GLOBAL",
             .op_get_upvalue => "OP_GET_UPVALUE",
             .op_set_upvalue => "OP_SET_UPVALUE",
+            .op_get_property => "OP_GET_PROPERTY",
+            .op_set_property => "OP_SET_PROPERTY",
             .op_equal => "OP_EQUAL",
             .op_greater => "OP_GREATER",
             .op_less => "OP_LESS",
@@ -68,6 +73,7 @@ pub const OpCode = enum(u8) {
             .op_closure => "OP_CLOSURE",
             .op_close_upvalue => "OP_CLOSE_UPVALUE",
             .op_return => "OP_RETURN",
+            .op_class => "OP_CLASS",
         };
     }
 };
