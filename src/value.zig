@@ -82,6 +82,10 @@ pub const Value = struct {
         return value.isObjType(.obj_instance);
     }
 
+    pub fn isBoundMethod(value: Value) bool {
+        return value.isObjType(.obj_bound_method);
+    }
+
     pub fn isClosure(value: Value) bool {
         return value.isObjType(.obj_closure);
     }
@@ -115,6 +119,10 @@ pub const Value = struct {
     }
 
     pub fn asInstance(value: Value) *ObjInstance {
+        return @alignCast(@ptrCast(value.as.obj));
+    }
+
+    pub fn asBoundMethod(value: Value) *ObjBoundMethod {
         return @alignCast(@ptrCast(value.as.obj));
     }
 
@@ -164,3 +172,4 @@ const ObjNative = zloc.ObjNative;
 const ObjClosure = zloc.ObjClosure;
 const ObjClass = zloc.ObjClass;
 const ObjInstance = zloc.ObjInstance;
+const ObjBoundMethod = zloc.ObjBoundMethod;

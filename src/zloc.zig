@@ -19,6 +19,7 @@ pub const NativeFn = @import("object.zig").NativeFn;
 pub const ObjUpvalue = @import("object.zig").ObjUpvalue;
 pub const ObjClass = @import("object.zig").ObjClass;
 pub const ObjInstance = @import("object.zig").ObjInstance;
+pub const ObjBoundMethod = @import("object.zig").ObjBoundMethod;
 pub const Table = @import("table.zig").Table;
 
 pub const printObject = @import("object.zig").printObject;
@@ -33,6 +34,7 @@ pub const newClosure = @import("object.zig").newClosure;
 pub const newUpvalue = @import("object.zig").newUpvalue;
 pub const newClass = @import("object.zig").newClass;
 pub const newInstance = @import("object.zig").newInstance;
+pub const newBoundMethod = @import("object.zig").newBoundMethod;
 pub const collectGarbage = @import("gc.zig").collectGarbage;
 
 pub fn printValue(value: Value) void {

@@ -16,6 +16,11 @@ pub const Compiler = struct {
     var parser: Parser = undefined;
     var scope_depth: usize = 0;
     pub var current: ?*Compiler = null;
+    var current_class: ?*ClassCompiler = null;
+
+    const ClassCompiler = struct {
+        enclosing: ?*ClassCompiler,
+    };
 
     enclosing: ?*Compiler,
     vm: *VM,
@@ -55,8 +60,13 @@ pub const Compiler = struct {
         compiler.local_count += 1;
         local.depth = 0;
         local.is_captured = false;
-        local.name.start = "";
-        local.name.length = 0;
+        if (function_type != .type_function) {
+            local.name.start = "this";
+            local.name.length = 4;
+        } else {
+            local.name.start = "";
+            local.name.length = 0;
+        }
 
         return compiler;
     }
@@ -142,7 +152,11 @@ pub const Compiler = struct {
     }
 
     fn emitReturn(compiler: *Compiler) void {
-        compiler.emitByte(OpCode.op_nil.u8());
+        if (compiler.type == .type_initializer) {
+            compiler.emitBytes(OpCode.op_get_local.u8(), 0);
+        } else {
+            compiler.emitByte(OpCode.op_nil.u8());
+        }
         compiler.emitByte(OpCode.op_return.u8());
     }
 
@@ -264,6 +278,10 @@ pub const Compiler = struct {
         if (can_assign and compiler.match(.token_equal)) {
             compiler.expression();
             compiler.emitBytes(OpCode.op_set_property.u8(), name_constant);
+        } else if (compiler.match(.token_left_paren)) {
+            const arg_count = compiler.argumentList();
+            compiler.emitBytes(OpCode.op_invoke.u8(), name_constant);
+            compiler.emitByte(arg_count);
         } else {
             compiler.emitBytes(OpCode.op_get_property.u8(), name_constant);
         }
@@ -334,6 +352,15 @@ pub const Compiler = struct {
 
     fn variable(compiler: *Compiler, can_assign: bool) void {
         compiler.namedVariable(parser.previous, can_assign);
+    }
+
+    fn this(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
+        if (current_class == null) {
+            compiler.@"error"("Can't use 'this' outside of a class.");
+            return;
+        }
+        compiler.variable(false);
     }
 
     fn unary(compiler: *Compiler, can_assign: bool) void {
@@ -624,6 +651,10 @@ pub const Compiler = struct {
         if (compiler.match(.token_semicolon)) {
             compiler.emitReturn();
         } else {
+            if (compiler.type == .type_initializer) {
+                compiler.@"error"("Can't return a value from an initializer.");
+            }
+
             compiler.expression();
             compiler.consume(.token_semicolon, "Expect ';' after return value.");
             compiler.emitByte(OpCode.op_return.u8());
@@ -636,17 +667,47 @@ pub const Compiler = struct {
         compiler.emitByte(OpCode.op_pop.u8());
     }
 
+    fn method(compiler: *Compiler) void {
+        compiler.consume(.token_identifier, "Expect method name.");
+        const name_constant = compiler.identifierConstant(&parser.previous);
+
+        var function_type: FunctionType = .type_method;
+        if (parser.previous.length == 4 and
+            std.mem.eql(u8, parser.previous.start[0..4], "init"))
+        {
+            function_type = .type_initializer;
+        }
+        compiler.compileFunction(function_type);
+
+        compiler.emitBytes(OpCode.op_method.u8(), name_constant);
+    }
+
     fn classDeclaration(compiler: *Compiler) void {
         compiler.consume(.token_identifier, "Expect class name.");
 
+        const class_name = parser.previous;
         const name_constant = compiler.identifierConstant(&parser.previous);
         compiler.declareVariable();
 
         compiler.emitBytes(OpCode.op_class.u8(), name_constant);
         compiler.defineVariable(name_constant);
 
+        var class_compiler = ClassCompiler{
+            .enclosing = current_class,
+        };
+        current_class = &class_compiler;
+
+        compiler.namedVariable(class_name, false);
+
         compiler.consume(.token_left_brace, "Expect '{' before class body.");
+
+        while (!compiler.check(.token_right_brace) and !compiler.check(.token_eof)) {
+            compiler.method();
+        }
+
         compiler.consume(.token_right_brace, "Expect '}' after class body.");
+        compiler.emitByte(OpCode.op_pop.u8()); // pop class
+        current_class = class_compiler.enclosing;
     }
 
     fn compileFunction(compiler: *Compiler, function_type: FunctionType) void {
@@ -845,6 +906,8 @@ const Upvalue = struct {
 
 const FunctionType = enum {
     type_function,
+    type_initializer,
+    type_method,
     type_script,
 };
 
@@ -1023,7 +1086,7 @@ const rules = blk: {
         .precedence = .prec_none,
     };
     tmp[TokenType.token_this.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.this,
         .infix = null,
         .precedence = .prec_none,
     };

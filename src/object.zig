@@ -1,6 +1,7 @@
 pub const ObjType = enum {
     obj_class,
     obj_instance,
+    obj_bound_method,
     obj_closure,
     obj_function,
     obj_native,
@@ -11,6 +12,7 @@ pub const ObjType = enum {
         return switch (obj_type) {
             .obj_class => "ObjClass",
             .obj_instance => "ObjInstance",
+            .obj_bound_method => "ObjBoundMethod",
             .obj_closure => "ObjClosure",
             .obj_function => "ObjFunction",
             .obj_native => "ObjNative",
@@ -31,6 +33,10 @@ pub const Obj = struct {
 
     pub fn asInstance(self: *Obj) *ObjInstance {
         return @as(*ObjInstance, @ptrCast(self));
+    }
+
+    pub fn asBoundMethod(self: *Obj) *ObjBoundMethod {
+        return @as(*ObjBoundMethod, @ptrCast(self));
     }
 
     pub fn asClosure(self: *Obj) *ObjClosure {
@@ -57,6 +63,7 @@ pub const Obj = struct {
 pub const ObjClass = struct {
     obj: Obj,
     name: *ObjString,
+    methods: Table,
 
     pub fn asObj(self: *ObjClass) *Obj {
         return @as(*Obj, @ptrCast(self));
@@ -69,6 +76,16 @@ pub const ObjInstance = struct {
     fields: Table,
 
     pub fn asObj(self: *ObjInstance) *Obj {
+        return @as(*Obj, @ptrCast(self));
+    }
+};
+
+pub const ObjBoundMethod = struct {
+    obj: Obj,
+    receiver: Value,
+    method: *ObjClosure,
+
+    pub fn asObj(self: *ObjBoundMethod) *Obj {
         return @as(*Obj, @ptrCast(self));
     }
 };
@@ -162,6 +179,9 @@ pub fn printObject(value: Value) void {
         .obj_instance => {
             stdout.print("{s} instance", .{value.asInstance().class.name.chars}) catch unreachable;
         },
+        .obj_bound_method => {
+            printFunction(value.asBoundMethod().method.function);
+        },
         .obj_closure => {
             printFunction(value.asClosure().function);
         },
@@ -199,6 +219,7 @@ pub fn allocateObject(vm: *VM, comptime obj_type: ObjType) ?*Obj {
         switch (obj_type) {
             .obj_class => break :blk ObjClass,
             .obj_instance => break :blk ObjInstance,
+            .obj_bound_method => break :blk ObjBoundMethod,
             .obj_closure => break :blk ObjClosure,
             .obj_function => break :blk ObjFunction,
             .obj_native => break :blk ObjNative,
@@ -249,12 +270,17 @@ pub fn freeObject(vm: *VM, obj: *Obj) void {
     switch (obj.type) {
         .obj_class => {
             const class = obj.asClass();
+            class.methods.deinit();
             vm.allocator.destroy(class);
         },
         .obj_instance => {
             const instance = obj.asInstance();
             instance.fields.deinit();
             vm.allocator.destroy(instance);
+        },
+        .obj_bound_method => {
+            const bound = obj.asBoundMethod();
+            vm.allocator.destroy(bound);
         },
         .obj_closure => {
             const closure = obj.asClosure();
@@ -344,6 +370,7 @@ pub fn newClass(vm: *VM, name: *ObjString) ?*ObjClass {
     const object = allocateObject(vm, .obj_class) orelse return null;
     const class = object.asClass();
     class.name = name;
+    class.methods = Table.init();
 
     return class;
 }
@@ -355,6 +382,15 @@ pub fn newInstance(vm: *VM, class: *ObjClass) ?*ObjInstance {
     instance.fields = Table.init();
 
     return instance;
+}
+
+pub fn newBoundMethod(vm: *VM, receiver: Value, method: *ObjClosure) ?*ObjBoundMethod {
+    const object = allocateObject(vm, .obj_bound_method) orelse return null;
+    const bound = object.asBoundMethod();
+    bound.receiver = receiver;
+    bound.method = method;
+
+    return bound;
 }
 
 const std = @import("std");

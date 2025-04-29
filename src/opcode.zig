@@ -31,6 +31,8 @@ pub const OpCode = enum(u8) {
     op_close_upvalue,
     op_return,
     op_class,
+    op_method,
+    op_invoke,
 
     pub inline fn from(byte: u8) OpCode {
         return @enumFromInt(byte);
@@ -74,6 +76,8 @@ pub const OpCode = enum(u8) {
             .op_close_upvalue => "OP_CLOSE_UPVALUE",
             .op_return => "OP_RETURN",
             .op_class => "OP_CLASS",
+            .op_method => "OP_METHOD",
+            .op_invoke => "OP_INVOKE",
         };
     }
 };

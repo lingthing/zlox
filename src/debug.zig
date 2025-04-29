@@ -55,9 +55,10 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_get_global,
         .op_define_global,
         .op_set_global,
-        .op_class,
         .op_get_property,
         .op_set_property,
+        .op_class,
+        .op_method,
         => {
             return constantInstruction(instruction.toString(), chunk, offset);
         },
@@ -80,6 +81,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         },
         .op_closure => {
             return closureInstruction(instruction.toString(), chunk, offset);
+        },
+        .op_invoke => {
+            return invokeInstruction(instruction.toString(), chunk, offset);
         },
     }
 
@@ -142,6 +146,17 @@ fn jumpInstruction(name: []const u8, sign: i8, chunk: *Chunk, offset: usize) usi
         offset,
         @as(isize, @intCast(offset)) + 3 + sign * @as(isize, @intCast(jump)),
     }) catch unreachable;
+
+    return offset + 3;
+}
+
+fn invokeInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const stdout = utils.getStdoutWriter();
+    const constant = chunk.getByte(offset + 1);
+    const arg_count = chunk.getByte(offset + 2);
+    stdout.print("{s:<16} ({d} args) {d:>4} '", .{ name, arg_count, constant }) catch unreachable;
+    zloc.printValue(chunk.getConstant(constant));
+    stdout.print("'\n", .{}) catch unreachable;
 
     return offset + 3;
 }

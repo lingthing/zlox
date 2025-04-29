@@ -10,6 +10,9 @@ const ObjFunction = zloc.ObjFunction;
 const ObjNative = zloc.ObjNative;
 const NativeFn = zloc.NativeFn;
 const ObjClosure = zloc.ObjClosure;
+const ObjClass = zloc.ObjClass;
+const ObjInstance = zloc.ObjInstance;
+const ObjBoundMethod = zloc.ObjBoundMethod;
 const ObjUpvalue = zloc.ObjUpvalue;
 const Table = zloc.Table;
 const MemoryManager = @import("memory.zig").MemoryManager;
@@ -94,6 +97,8 @@ pub const VM = struct {
     next_gc: usize,
     gray_stack: std.ArrayList(*Obj),
 
+    init_string: ?*ObjString,
+
     pub fn init(gpa: std.mem.Allocator) *VM {
         var vm: *VM = gpa.create(VM) catch unreachable;
         vm.gpa = gpa;
@@ -112,6 +117,9 @@ pub const VM = struct {
         vm.next_gc = 1024 * 1024;
         vm.gray_stack = std.ArrayList(*Obj).init(gpa);
 
+        vm.init_string = null;
+        vm.init_string = zloc.copyString(vm, "init").?;
+
         vm.defineNative("clock", clockNative);
         vm.defineNative("exit", exitNative);
         vm.defineNative("fib", fibNative);
@@ -122,6 +130,7 @@ pub const VM = struct {
     pub fn deinit(vm: *VM) void {
         vm.globals.deinit();
         vm.strings.deinit();
+        vm.init_string = null;
         vm.freeObjects();
         vm.gpa.free(vm.stack);
 
@@ -222,7 +231,24 @@ pub const VM = struct {
                     const class = callee.asClass();
                     (vm.stack_top - arg_count - 1)[0] = Value.initObj(zloc.newInstance(vm, class).?);
 
+                    if (vm.init_string) |init_string| {
+                        var initializer: Value = undefined;
+                        if (class.methods.get(init_string, &initializer)) {
+                            return vm.call(initializer.asClosure(), arg_count);
+                        } else if (arg_count != 0) {
+                            vm.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
+
+                            return false;
+                        }
+                    }
+
                     return true;
+                },
+                .obj_bound_method => {
+                    const bound = callee.asBoundMethod();
+                    (vm.stack_top - arg_count - 1)[0] = bound.receiver;
+
+                    return vm.call(bound.method, arg_count);
                 },
                 .obj_closure => {
                     return vm.call(callee.asClosure(), arg_count);
@@ -299,6 +325,58 @@ pub const VM = struct {
             upvalue.?.location = &upvalue.?.closed;
             vm.open_upvalues = upvalue.?.next;
         }
+    }
+
+    fn defineMethod(vm: *VM, name: *ObjString) void {
+        const method = vm.peek(0);
+        const class = vm.peek(1).asClass();
+        _ = class.methods.set(name, method);
+        _ = vm.pop();
+    }
+
+    fn bindMethod(vm: *VM, class: *ObjClass, name: *ObjString) bool {
+        var method: Value = undefined;
+        if (!class.methods.get(name, &method)) {
+            vm.runtimeError("Undefined property '{s}'.", .{name.chars});
+
+            return false;
+        }
+
+        const bound = zloc.newBoundMethod(vm, vm.peek(0), method.asClosure()).?;
+        _ = vm.pop();
+        vm.push(Value.initObj(bound));
+
+        return true;
+    }
+
+    fn invoke(vm: *VM, name: *ObjString, arg_count: u8) bool {
+        const receiver = vm.peek(arg_count);
+        if (!receiver.isInstance()) {
+            vm.runtimeError("Only instances have methods.", .{});
+
+            return false;
+        }
+
+        const instance = receiver.asInstance();
+        var value: Value = undefined;
+        if (instance.fields.get(name, &value)) {
+            (vm.stack_top - arg_count - 1)[0] = value;
+
+            return vm.callValue(value, arg_count);
+        }
+
+        return vm.invokeFromClass(instance.class, name, arg_count);
+    }
+
+    fn invokeFromClass(vm: *VM, class: *ObjClass, name: *ObjString, arg_count: u8) bool {
+        var method: Value = undefined;
+        if (!class.methods.get(name, &method)) {
+            vm.runtimeError("Undefined property '{s}'.", .{name.chars});
+
+            return false;
+        }
+
+        return vm.call(method.asClosure(), arg_count);
     }
 
     fn run(vm: *VM) InterpretResult {
@@ -396,9 +474,9 @@ pub const VM = struct {
                         continue;
                     }
 
-                    vm.runtimeError("Undefined property '{s}'.", .{name.chars});
-
-                    return .runtime_error;
+                    if (!vm.bindMethod(instance.class, name)) {
+                        return .runtime_error;
+                    }
                 },
                 .op_set_property => {
                     if (!vm.peek(1).isInstance()) {
@@ -570,6 +648,17 @@ pub const VM = struct {
                 .op_class => {
                     const name = frame.readString();
                     vm.push(Value.initObj(zloc.newClass(vm, name).?));
+                },
+                .op_method => {
+                    vm.defineMethod(frame.readString());
+                },
+                .op_invoke => {
+                    const method_name = frame.readString();
+                    const arg_count = frame.readByte();
+                    if (!vm.invoke(method_name, arg_count)) {
+                        return .runtime_error;
+                    }
+                    frame = &vm.frames[vm.frame_count - 1];
                 },
             }
         }

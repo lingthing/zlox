@@ -56,6 +56,9 @@ fn markRoots(vm: *VM) void {
 
     markTable(vm, &vm.globals);
     markCompilerRoots(vm);
+    if (vm.init_string) |init_string| {
+        markObject(vm, init_string.asObj());
+    }
 }
 
 fn markValue(vm: *VM, value: Value) void {
@@ -138,11 +141,17 @@ fn blackenObject(vm: *VM, object: *Obj) void {
         .obj_class => {
             const class = object.asClass();
             markObject(vm, class.name.asObj());
+            markTable(vm, &class.methods);
         },
         .obj_instance => {
             const instance = object.asInstance();
             markObject(vm, instance.class.asObj());
             markTable(vm, &instance.fields);
+        },
+        .obj_bound_method => {
+            const bound = object.asBoundMethod();
+            markValue(vm, bound.receiver);
+            markObject(vm, bound.method.asObj());
         },
         .obj_upvalue => {
             const upvalue = object.asUpvalue();
