@@ -25,8 +25,11 @@ pub const InterpretResult = enum {
     runtime_error,
 };
 
-pub const FRAMES_MAX = 64;
+pub const FRAMES_MAX = 3000;
 pub const STACK_SIZE = FRAMES_MAX * 256;
+// const FRAME_UNIT_SZIE = 256;
+// pub const STACK_SIZE = 2 * 1024 * 1024;
+// pub const FRAMES_MAX = (STACK_SIZE / FRAME_UNIT_SZIE + @sizeOf(Value) - 1) / @sizeOf(Value);
 
 const CallFrame = struct {
     closure: *ObjClosure,
@@ -119,6 +122,9 @@ pub const VM = struct {
 
         vm.init_string = null;
         vm.init_string = zloc.copyString(vm, "init").?;
+
+        std.debug.print("sizeof Value: {d}\n", .{@sizeOf(Value)});
+        std.debug.print("Max callframes: {d}\n", .{FRAMES_MAX});
 
         vm.defineNative("clock", clockNative);
         vm.defineNative("exit", exitNative);

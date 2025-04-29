@@ -29,7 +29,7 @@ pub const Table = struct {
     }
 
     fn findEntry(entries: [*]Entry, capacity: usize, key: *ObjString) *Entry {
-        var index = key.hash % capacity;
+        var index = key.hash & (capacity - 1);
         var tombstone: ?*Entry = null;
         while (true) {
             const entry = &entries[index];
@@ -43,7 +43,7 @@ pub const Table = struct {
                 return entry;
             }
 
-            index = (index + 1) % capacity;
+            index = (index + 1) & (capacity - 1);
         }
     }
 
@@ -110,7 +110,7 @@ pub const Table = struct {
     pub fn findString(table: *Table, chars: []const u8, hash: u32) ?*ObjString {
         if (table.count == 0) return null;
 
-        var index = hash % table.capacity;
+        var index = hash & (table.capacity - 1);
         while (true) {
             const entry = &table.entries[index];
             if (entry.key == null) {
@@ -122,7 +122,7 @@ pub const Table = struct {
                 return entry.key;
             }
 
-            index = (index + 1) % table.capacity;
+            index = (index + 1) & (table.capacity - 1);
         }
     }
 

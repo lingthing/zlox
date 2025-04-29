@@ -1,6 +1,6 @@
 pub const ValueType = enum {
-    val_bool,
     val_nil,
+    val_bool,
     val_number,
     val_obj,
 };
