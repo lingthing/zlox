@@ -102,7 +102,7 @@ pub const Table = struct {
         for (0..from.capacity) |i| {
             const entry = &from.entries[i];
             if (entry.key) |key| {
-                to.set(key, entry.value);
+                _ = to.set(key, entry.value);
             }
         }
     }

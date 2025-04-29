@@ -20,6 +20,7 @@ pub const Compiler = struct {
 
     const ClassCompiler = struct {
         enclosing: ?*ClassCompiler,
+        has_superclass: bool,
     };
 
     enclosing: ?*Compiler,
@@ -352,6 +353,29 @@ pub const Compiler = struct {
 
     fn variable(compiler: *Compiler, can_assign: bool) void {
         compiler.namedVariable(parser.previous, can_assign);
+    }
+
+    fn super(compiler: *Compiler, can_assign: bool) void {
+        _ = can_assign;
+        if (current_class == null) {
+            compiler.@"error"("Can't use 'super' outside of a class.");
+        } else if (!current_class.?.has_superclass) {
+            compiler.@"error"("Can't use 'super' in a class with no superclass.");
+        }
+
+        compiler.consume(.token_dot, "Expect '.' after 'super'.");
+        compiler.consume(.token_identifier, "Expect superclass method name.");
+        const name_constant = compiler.identifierConstant(&parser.previous);
+        compiler.namedVariable(syntheticToken("this"), false);
+        if (compiler.match(.token_left_paren)) {
+            const arg_count = compiler.argumentList();
+            compiler.namedVariable(syntheticToken("super"), false);
+            compiler.emitBytes(OpCode.op_super_invoke.u8(), name_constant);
+            compiler.emitByte(arg_count);
+        } else {
+            compiler.namedVariable(syntheticToken("super"), false);
+            compiler.emitBytes(OpCode.op_get_super.u8(), name_constant);
+        }
     }
 
     fn this(compiler: *Compiler, can_assign: bool) void {
@@ -694,8 +718,25 @@ pub const Compiler = struct {
 
         var class_compiler = ClassCompiler{
             .enclosing = current_class,
+            .has_superclass = false,
         };
         current_class = &class_compiler;
+
+        if (compiler.match(.token_less)) {
+            compiler.consume(.token_identifier, "Expect superclass name.");
+            compiler.variable(false);
+            if (class_name.eql(&parser.previous)) {
+                compiler.@"error"("A class can't inherit from itself.");
+            }
+
+            compiler.beginScope();
+            compiler.addLocal(syntheticToken("super"));
+            compiler.defineVariable(0);
+
+            compiler.namedVariable(class_name, false);
+            compiler.emitByte(OpCode.op_inherit.u8());
+            class_compiler.has_superclass = true;
+        }
 
         compiler.namedVariable(class_name, false);
 
@@ -707,6 +748,9 @@ pub const Compiler = struct {
 
         compiler.consume(.token_right_brace, "Expect '}' after class body.");
         compiler.emitByte(OpCode.op_pop.u8()); // pop class
+        if (class_compiler.has_superclass) {
+            compiler.endScope();
+        }
         current_class = class_compiler.enclosing;
     }
 
@@ -1081,7 +1125,7 @@ const rules = blk: {
         .precedence = .prec_none,
     };
     tmp[TokenType.token_super.u8()] = .{
-        .prefix = null,
+        .prefix = Compiler.super,
         .infix = null,
         .precedence = .prec_none,
     };
@@ -1121,4 +1165,12 @@ const rules = blk: {
 
 fn getRule(token_type: TokenType) *const ParseRule {
     return &rules[token_type.u8()];
+}
+
+fn syntheticToken(text: []const u8) Token {
+    var token: Token = undefined;
+    token.start = text.ptr;
+    token.length = @as(u32, @truncate(text.len));
+
+    return token;
 }

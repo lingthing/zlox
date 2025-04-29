@@ -492,6 +492,14 @@ pub const VM = struct {
                     _ = vm.pop(); // pop the instance
                     vm.push(value);
                 },
+                .op_get_super => {
+                    const name = frame.readString();
+                    const superclass = vm.pop().asClass();
+
+                    if (!vm.bindMethod(superclass, name)) {
+                        return .runtime_error;
+                    }
+                },
                 .op_equal => {
                     const b = vm.pop();
                     const a = vm.pop();
@@ -613,6 +621,24 @@ pub const VM = struct {
                     }
                     frame = &vm.frames[vm.frame_count - 1];
                 },
+                .op_invoke => {
+                    const method_name = frame.readString();
+                    const arg_count = frame.readByte();
+                    if (!vm.invoke(method_name, arg_count)) {
+                        return .runtime_error;
+                    }
+                    frame = &vm.frames[vm.frame_count - 1];
+                },
+                .op_super_invoke => {
+                    const method_name = frame.readString();
+                    const arg_count = frame.readByte();
+                    const superclass = vm.pop().asClass();
+                    if (!vm.invokeFromClass(superclass, method_name, arg_count)) {
+                        return .runtime_error;
+                    }
+
+                    frame = &vm.frames[vm.frame_count - 1];
+                },
                 .op_closure => {
                     const function = frame.readConstant().asFunction();
                     const closure = zloc.newClosure(vm, function).?;
@@ -649,16 +675,20 @@ pub const VM = struct {
                     const name = frame.readString();
                     vm.push(Value.initObj(zloc.newClass(vm, name).?));
                 },
-                .op_method => {
-                    vm.defineMethod(frame.readString());
-                },
-                .op_invoke => {
-                    const method_name = frame.readString();
-                    const arg_count = frame.readByte();
-                    if (!vm.invoke(method_name, arg_count)) {
+                .op_inherit => {
+                    const superclass = vm.peek(1);
+                    if (!superclass.isClass()) {
+                        vm.runtimeError("Superclass must be a class.", .{});
+
                         return .runtime_error;
                     }
-                    frame = &vm.frames[vm.frame_count - 1];
+
+                    const subclass = vm.peek(0).asClass();
+                    subclass.methods.addAll(&superclass.asClass().methods);
+                    _ = vm.pop(); // pop subclass
+                },
+                .op_method => {
+                    vm.defineMethod(frame.readString());
                 },
             }
         }

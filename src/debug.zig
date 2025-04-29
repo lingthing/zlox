@@ -48,6 +48,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_print,
         .op_close_upvalue,
         .op_return,
+        .op_inherit,
         => {
             return simpleInstruction(instruction.toString(), offset);
         },
@@ -57,6 +58,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_set_global,
         .op_get_property,
         .op_set_property,
+        .op_get_super,
         .op_class,
         .op_method,
         => {
@@ -82,7 +84,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .op_closure => {
             return closureInstruction(instruction.toString(), chunk, offset);
         },
-        .op_invoke => {
+        .op_invoke,
+        .op_super_invoke,
+        => {
             return invokeInstruction(instruction.toString(), chunk, offset);
         },
     }

@@ -13,6 +13,7 @@ pub const OpCode = enum(u8) {
     op_set_upvalue,
     op_get_property,
     op_set_property,
+    op_get_super,
     op_equal,
     op_greater,
     op_less,
@@ -27,12 +28,14 @@ pub const OpCode = enum(u8) {
     op_jump_if_false,
     op_loop,
     op_call,
+    op_invoke,
+    op_super_invoke,
     op_closure,
     op_close_upvalue,
     op_return,
     op_class,
+    op_inherit,
     op_method,
-    op_invoke,
 
     pub inline fn from(byte: u8) OpCode {
         return @enumFromInt(byte);
@@ -58,6 +61,7 @@ pub const OpCode = enum(u8) {
             .op_set_upvalue => "OP_SET_UPVALUE",
             .op_get_property => "OP_GET_PROPERTY",
             .op_set_property => "OP_SET_PROPERTY",
+            .op_get_super => "OP_GET_SUPER",
             .op_equal => "OP_EQUAL",
             .op_greater => "OP_GREATER",
             .op_less => "OP_LESS",
@@ -72,12 +76,14 @@ pub const OpCode = enum(u8) {
             .op_jump_if_false => "OP_JUMP_IF_FALSE",
             .op_loop => "OP_LOOP",
             .op_call => "OP_CALL",
+            .op_invoke => "OP_INVOKE",
+            .op_super_invoke => "OP_SUPER_INVOKE",
             .op_closure => "OP_CLOSURE",
             .op_close_upvalue => "OP_CLOSE_UPVALUE",
             .op_return => "OP_RETURN",
             .op_class => "OP_CLASS",
+            .op_inherit => "OP_INHERIT",
             .op_method => "OP_METHOD",
-            .op_invoke => "OP_INVOKE",
         };
     }
 };

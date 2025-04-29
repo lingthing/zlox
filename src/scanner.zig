@@ -210,7 +210,7 @@ pub const Token = struct {
     length: u32,
     line: u32,
 
-    pub fn eql(a: *Token, b: *Token) bool {
+    pub fn eql(a: *const Token, b: *const Token) bool {
         if (a.length != b.length) return false;
 
         return mem.eql(u8, a.start[0..a.length], b.start[0..b.length]);
