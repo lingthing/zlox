@@ -123,9 +123,6 @@ pub const VM = struct {
         vm.init_string = null;
         vm.init_string = zloc.copyString(vm, "init").?;
 
-        std.debug.print("sizeof Value: {d}\n", .{@sizeOf(Value)});
-        std.debug.print("Max callframes: {d}\n", .{FRAMES_MAX});
-
         vm.defineNative("clock", clockNative);
         vm.defineNative("exit", exitNative);
         vm.defineNative("fib", fibNative);
