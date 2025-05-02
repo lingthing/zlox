@@ -154,25 +154,31 @@ pub const Compiler = struct {
 
     fn emitReturn(compiler: *Compiler) void {
         if (compiler.type == .type_initializer) {
-            compiler.emitBytes(OpCode.op_get_local.u8(), 0);
+            compiler.emitByte(OpCode.op_get_local.u8());
+            compiler.emitShort(0);
         } else {
             compiler.emitByte(OpCode.op_nil.u8());
         }
         compiler.emitByte(OpCode.op_return.u8());
     }
 
-    fn makeConstant(compiler: *Compiler, value: Value) u8 {
+    fn makeConstant(compiler: *Compiler, value: Value) usize {
         const constant = compiler.currentChunk().addConstant(value, compiler.vm);
-        if (constant > std.math.maxInt(u8)) {
+        if (constant > std.math.maxInt(u16)) {
             compiler.@"error"("Too many constants in one chunk.");
             return 0;
         }
 
-        return @as(u8, @intCast(constant));
+        return constant;
     }
 
     fn emitConstant(compiler: *Compiler, value: Value) void {
-        compiler.emitBytes(OpCode.op_constant.u8(), compiler.makeConstant(value));
+        compiler.emitByte(OpCode.op_constant.u8());
+        compiler.emitShort(compiler.makeConstant(value));
+    }
+
+    fn emitShort(compiler: *Compiler, num: usize) void {
+        compiler.emitBytes(@truncate(num >> 8), @truncate(num));
     }
 
     fn patchJump(compiler: *Compiler, offset: usize) void {
@@ -278,13 +284,16 @@ pub const Compiler = struct {
 
         if (can_assign and compiler.match(.token_equal)) {
             compiler.expression();
-            compiler.emitBytes(OpCode.op_set_property.u8(), name_constant);
+            compiler.emitByte(OpCode.op_set_property.u8());
+            compiler.emitShort(name_constant);
         } else if (compiler.match(.token_left_paren)) {
             const arg_count = compiler.argumentList();
-            compiler.emitBytes(OpCode.op_invoke.u8(), name_constant);
+            compiler.emitByte(OpCode.op_invoke.u8());
+            compiler.emitShort(name_constant);
             compiler.emitByte(arg_count);
         } else {
-            compiler.emitBytes(OpCode.op_get_property.u8(), name_constant);
+            compiler.emitByte(OpCode.op_get_property.u8());
+            compiler.emitShort(name_constant);
         }
     }
 
@@ -327,7 +336,7 @@ pub const Compiler = struct {
         var mut_name = name;
         var get_op: u8 = undefined;
         var set_op: u8 = undefined;
-        var arg = compiler.resolveLocal(&mut_name);
+        var arg: isize = compiler.resolveLocal(&mut_name);
         if (arg != -1) {
             get_op = OpCode.op_get_local.u8();
             set_op = OpCode.op_set_local.u8();
@@ -337,7 +346,7 @@ pub const Compiler = struct {
                 get_op = OpCode.op_get_upvalue.u8();
                 set_op = OpCode.op_set_upvalue.u8();
             } else {
-                arg = compiler.identifierConstant(&mut_name);
+                arg = @as(isize, @intCast(compiler.identifierConstant(&mut_name)));
                 get_op = OpCode.op_get_global.u8();
                 set_op = OpCode.op_set_global.u8();
             }
@@ -345,9 +354,21 @@ pub const Compiler = struct {
 
         if (can_assign and compiler.match(.token_equal)) {
             compiler.expression();
-            compiler.emitBytes(set_op, @as(u8, @intCast(arg)));
+            compiler.emitByte(set_op);
+            // if (set_op == OpCode.op_set_global.u8()) {
+            //     compiler.emitShort(@as(usize, @intCast(arg)));
+            // } else {
+            //     compiler.emitByte(@as(u8, @intCast(arg)));
+            // }
+            compiler.emitShort(@as(usize, @intCast(arg)));
         } else {
-            compiler.emitBytes(get_op, @as(u8, @intCast(arg)));
+            compiler.emitByte(get_op);
+            // if (set_op == OpCode.op_get_global.u8()) {
+            //     compiler.emitShort(@as(usize, @intCast(arg)));
+            // } else {
+            //     compiler.emitByte(@as(u8, @intCast(arg)));
+            // }
+            compiler.emitShort(@as(usize, @intCast(arg)));
         }
     }
 
@@ -370,11 +391,13 @@ pub const Compiler = struct {
         if (compiler.match(.token_left_paren)) {
             const arg_count = compiler.argumentList();
             compiler.namedVariable(syntheticToken("super"), false);
-            compiler.emitBytes(OpCode.op_super_invoke.u8(), name_constant);
+            compiler.emitByte(OpCode.op_super_invoke.u8());
+            compiler.emitShort(name_constant);
             compiler.emitByte(arg_count);
         } else {
             compiler.namedVariable(syntheticToken("super"), false);
-            compiler.emitBytes(OpCode.op_get_super.u8(), name_constant);
+            compiler.emitByte(OpCode.op_get_super.u8());
+            compiler.emitShort(name_constant);
         }
     }
 
@@ -421,7 +444,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn identifierConstant(compiler: *Compiler, name: *Token) u8 {
+    fn identifierConstant(compiler: *Compiler, name: *Token) usize {
         const value = zloc.copyString(compiler.vm, name.start[0..name.length]);
 
         return compiler.makeConstant(Value.initObj(value.?));
@@ -518,7 +541,7 @@ pub const Compiler = struct {
         compiler.addLocal(name.*);
     }
 
-    fn parseVariable(compiler: *Compiler, error_message: []const u8) u8 {
+    fn parseVariable(compiler: *Compiler, error_message: []const u8) usize {
         compiler.consume(.token_identifier, error_message);
 
         compiler.declareVariable();
@@ -534,13 +557,14 @@ pub const Compiler = struct {
         compiler.locals[compiler.local_count - 1].depth = @intCast(scope_depth);
     }
 
-    fn defineVariable(compiler: *Compiler, global: u8) void {
+    fn defineVariable(compiler: *Compiler, global: usize) void {
         if (scope_depth > 0) {
             compiler.markInitialized();
             return;
         }
 
-        compiler.emitBytes(OpCode.op_define_global.u8(), global);
+        compiler.emitByte(OpCode.op_define_global.u8());
+        compiler.emitShort(global);
     }
 
     fn and_(compiler: *Compiler, can_assign: bool) void {
@@ -703,7 +727,8 @@ pub const Compiler = struct {
         }
         compiler.compileFunction(function_type);
 
-        compiler.emitBytes(OpCode.op_method.u8(), name_constant);
+        compiler.emitByte(OpCode.op_method.u8());
+        compiler.emitShort(name_constant);
     }
 
     fn classDeclaration(compiler: *Compiler) void {
@@ -713,7 +738,8 @@ pub const Compiler = struct {
         const name_constant = compiler.identifierConstant(&parser.previous);
         compiler.declareVariable();
 
-        compiler.emitBytes(OpCode.op_class.u8(), name_constant);
+        compiler.emitByte(OpCode.op_class.u8());
+        compiler.emitShort(name_constant);
         compiler.defineVariable(name_constant);
 
         var class_compiler = ClassCompiler{
@@ -787,10 +813,8 @@ pub const Compiler = struct {
             return;
         }
 
-        compiler.emitBytes(
-            OpCode.op_closure.u8(),
-            compiler.makeConstant(Value.initObj(function.?)),
-        );
+        compiler.emitByte(OpCode.op_closure.u8());
+        compiler.emitShort(compiler.makeConstant(Value.initObj(function.?)));
         for (0..function.?.upvalue_count) |i| {
             compiler.emitByte(@intFromBool(fun_compiler.upvalues[i].is_local));
             compiler.emitByte(fun_compiler.upvalues[i].index);
@@ -805,7 +829,7 @@ pub const Compiler = struct {
     }
 
     fn varDeclaration(compiler: *Compiler) void {
-        const global: u8 = compiler.parseVariable("Expect variable name.");
+        const global: usize = compiler.parseVariable("Expect variable name.");
 
         if (compiler.match(.token_equal)) {
             compiler.expression();

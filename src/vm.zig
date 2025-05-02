@@ -52,7 +52,7 @@ const CallFrame = struct {
     }
 
     fn readConstant(frame: *CallFrame) Value {
-        return frame.closure.function.chunk.getConstant(frame.readByte());
+        return frame.closure.function.chunk.getConstant(frame.readShort());
     }
 
     fn readString(frame: *CallFrame) *ObjString {
@@ -60,16 +60,22 @@ const CallFrame = struct {
     }
 };
 
-fn clockNative(args: []Value) Value {
+fn clockNative(vm: *VM, args: []Value) Value {
+    _ = vm;
     _ = args;
 
     return Value.initNumber(@floatFromInt(std.time.milliTimestamp()));
 }
 
-fn exitNative(args: []Value) Value {
-    _ = args;
+fn exitNative(vm: *VM, args: []Value) Value {
+    _ = vm;
 
-    std.process.exit(0);
+    var status: u8 = 0;
+    if (args.len == 1 and args[0].isNumber()) {
+        status = @as(u8, @intFromFloat(args[0].asNumber()));
+    }
+
+    std.process.exit(status);
 }
 
 fn fib(n: f64) f64 {
@@ -79,14 +85,56 @@ fn fib(n: f64) f64 {
     return fib(n - 1) + fib(n - 2);
 }
 
-fn fibNative(args: []Value) Value {
+fn fibNative(vm: *VM, args: []Value) Value {
+    _ = vm;
     return Value.initNumber(fib(args[0].asNumber()));
+}
+
+fn getcNative(vm: *VM, args: []Value) Value {
+    _ = vm;
+    _ = args;
+    const stdin = std.io.getStdIn().reader();
+    const byte = stdin.readByte() catch |err| switch (err) {
+        error.EndOfStream => return Value.initNumber(-1),
+        else => return Value.initNil(),
+    };
+
+    return Value.initNumber(@floatFromInt(byte));
+}
+
+fn chrNative(vm: *VM, args: []Value) Value {
+    if (args.len != 1 or !args[0].isNumber()) return Value.initNil();
+    if (args[0].asNumber() < 0 or args[0].asNumber() > 255) return Value.initNil();
+
+    var buf: [1]u8 = undefined;
+    buf[0] = @as(u8, @intFromFloat(args[0].asNumber()));
+
+    return Value.initObj(zloc.copyString(vm, &buf).?);
+}
+
+fn printErrorNative(vm: *VM, args: []Value) Value {
+    _ = vm;
+    if (args.len != 1 or !args[0].isString()) return Value.initNil();
+    const stderr = utils.getStderrWriter();
+    stderr.print("{s}\n", .{args[0].asRawString()}) catch {};
+
+    return Value.initNil();
 }
 
 pub const VM = struct {
     gpa: std.mem.Allocator, // raw
     allocator: std.mem.Allocator, // normal
     memory_manager: *MemoryManager,
+
+    obj_class_pool: std.heap.MemoryPool(ObjClass),
+    obj_instance_pool: std.heap.MemoryPool(ObjInstance),
+    obj_bound_method_pool: std.heap.MemoryPool(ObjBoundMethod),
+    obj_closure_pool: std.heap.MemoryPool(ObjClosure),
+    obj_function_pool: std.heap.MemoryPool(ObjFunction),
+    obj_native_pool: std.heap.MemoryPool(ObjNative),
+    obj_string_pool: std.heap.MemoryPool(ObjString),
+    obj_upvalue_pool: std.heap.MemoryPool(ObjUpvalue),
+
     frames: [FRAMES_MAX]CallFrame,
     frame_count: usize,
     stack: []Value,
@@ -109,6 +157,15 @@ pub const VM = struct {
         vm.memory_manager.* = MemoryManager.init(vm, gpa);
         vm.allocator = vm.memory_manager.allocator();
 
+        vm.obj_class_pool = std.heap.MemoryPool(ObjClass).init(gpa);
+        vm.obj_instance_pool = std.heap.MemoryPool(ObjInstance).init(gpa);
+        vm.obj_bound_method_pool = std.heap.MemoryPool(ObjBoundMethod).init(gpa);
+        vm.obj_closure_pool = std.heap.MemoryPool(ObjClosure).init(gpa);
+        vm.obj_function_pool = std.heap.MemoryPool(ObjFunction).init(gpa);
+        vm.obj_native_pool = std.heap.MemoryPool(ObjNative).init(gpa);
+        vm.obj_string_pool = std.heap.MemoryPool(ObjString).init(gpa);
+        vm.obj_upvalue_pool = std.heap.MemoryPool(ObjUpvalue).init(gpa);
+
         vm.stack = gpa.alloc(Value, STACK_SIZE) catch unreachable;
         vm.resetStack();
 
@@ -126,6 +183,23 @@ pub const VM = struct {
         vm.defineNative("clock", clockNative);
         vm.defineNative("exit", exitNative);
         vm.defineNative("fib", fibNative);
+        vm.defineNative("getc", getcNative);
+        vm.defineNative("chr", chrNative);
+        vm.defineNative("print_error", printErrorNative);
+
+        _ = vm.interpret(
+            \\fun read_line() {
+            \\  var res = "";
+            \\  var ch;
+            \\  while ((ch = getc()) != -1 and ch != 10) {
+            \\    if (ch != 13) {
+            \\      res = res + chr(ch);
+            \\    }
+            \\  }
+            \\  return res;
+            \\}
+            \\
+        );
 
         return vm;
     }
@@ -139,6 +213,15 @@ pub const VM = struct {
 
         vm.memory_manager.deinit();
         vm.gpa.destroy(vm.memory_manager);
+
+        vm.obj_class_pool.deinit();
+        vm.obj_instance_pool.deinit();
+        vm.obj_bound_method_pool.deinit();
+        vm.obj_closure_pool.deinit();
+        vm.obj_function_pool.deinit();
+        vm.obj_native_pool.deinit();
+        vm.obj_string_pool.deinit();
+        vm.obj_upvalue_pool.deinit();
 
         vm.gray_stack.deinit();
         vm.gpa.destroy(vm);
@@ -258,7 +341,7 @@ pub const VM = struct {
                 },
                 .obj_native => {
                     const native = callee.asNative();
-                    const result = native.function((vm.stack_top - arg_count)[0..arg_count]);
+                    const result = native.function(vm, (vm.stack_top - arg_count)[0..arg_count]);
                     vm.stack_top -= arg_count + 1;
                     vm.push(result);
 
@@ -421,11 +504,11 @@ pub const VM = struct {
                     _ = vm.pop();
                 },
                 .op_get_local => {
-                    const slot = frame.readByte();
+                    const slot = frame.readShort();
                     vm.push(frame.slots[slot]);
                 },
                 .op_set_local => {
-                    const slot = frame.readByte();
+                    const slot = frame.readShort();
                     frame.slots[slot] = vm.peek(0);
                 },
                 .op_get_global => {
@@ -453,11 +536,11 @@ pub const VM = struct {
                     }
                 },
                 .op_get_upvalue => {
-                    const slot = frame.readByte();
+                    const slot = frame.readShort();
                     vm.push(frame.closure.upvalues[slot].?.location.*);
                 },
                 .op_set_upvalue => {
-                    const slot = frame.readByte();
+                    const slot = frame.readShort();
                     frame.closure.upvalues[slot].?.location.* = vm.peek(0);
                 },
                 .op_get_property => {

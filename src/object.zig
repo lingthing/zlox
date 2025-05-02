@@ -20,6 +20,19 @@ pub const ObjType = enum {
             .obj_upvalue => "ObjUpvalue",
         };
     }
+
+    pub fn toType(comptime obj_type: ObjType) type {
+        return switch (obj_type) {
+            .obj_class => ObjClass,
+            .obj_instance => ObjInstance,
+            .obj_bound_method => ObjBoundMethod,
+            .obj_closure => ObjClosure,
+            .obj_function => ObjFunction,
+            .obj_native => ObjNative,
+            .obj_string => ObjString,
+            .obj_upvalue => ObjUpvalue,
+        };
+    }
 };
 
 pub const Obj = struct {
@@ -113,7 +126,7 @@ pub const ObjFunction = struct {
     }
 };
 
-pub const NativeFn = *const fn (args: []Value) Value;
+pub const NativeFn = *const fn (vm: *VM, args: []Value) Value;
 
 pub const ObjNative = struct {
     obj: Obj,
@@ -215,18 +228,7 @@ fn printFunction(function: *ObjFunction) void {
 }
 
 pub fn allocateObject(vm: *VM, comptime obj_type: ObjType) ?*Obj {
-    const unknown = vm.allocator.create(comptime blk: {
-        switch (obj_type) {
-            .obj_class => break :blk ObjClass,
-            .obj_instance => break :blk ObjInstance,
-            .obj_bound_method => break :blk ObjBoundMethod,
-            .obj_closure => break :blk ObjClosure,
-            .obj_function => break :blk ObjFunction,
-            .obj_native => break :blk ObjNative,
-            .obj_string => break :blk ObjString,
-            .obj_upvalue => break :blk ObjUpvalue,
-        }
-    }) catch return null;
+    const unknown = fetchObjectInPool(vm, obj_type) orelse return null;
 
     var object = unknown.asObj();
     object.type = obj_type;
@@ -271,39 +273,47 @@ pub fn freeObject(vm: *VM, obj: *Obj) void {
         .obj_class => {
             const class = obj.asClass();
             class.methods.deinit();
-            vm.allocator.destroy(class);
+            // vm.allocator.destroy(class);
+            vm.obj_class_pool.destroy(class);
         },
         .obj_instance => {
             const instance = obj.asInstance();
             instance.fields.deinit();
-            vm.allocator.destroy(instance);
+            // vm.allocator.destroy(instance);
+            vm.obj_instance_pool.destroy(instance);
         },
         .obj_bound_method => {
             const bound = obj.asBoundMethod();
-            vm.allocator.destroy(bound);
+            // vm.allocator.destroy(bound);
+            vm.obj_bound_method_pool.destroy(bound);
         },
         .obj_closure => {
             const closure = obj.asClosure();
             vm.allocator.free(closure.upvalues[0..closure.upvalue_count]);
-            vm.allocator.destroy(closure);
+            // vm.allocator.destroy(closure);
+            vm.obj_closure_pool.destroy(closure);
         },
         .obj_function => {
             const function = obj.asFunction();
             function.chunk.deinit();
-            vm.allocator.destroy(function);
+            // vm.allocator.destroy(function);
+            vm.obj_function_pool.destroy(function);
         },
         .obj_native => {
             const native = obj.asNative();
-            vm.allocator.destroy(native);
+            // vm.allocator.destroy(native);
+            vm.obj_native_pool.destroy(native);
         },
         .obj_string => {
             const string = obj.asString();
             vm.allocator.free(string.chars);
-            vm.allocator.destroy(string);
+            // vm.allocator.destroy(string);
+            vm.obj_string_pool.destroy(string);
         },
         .obj_upvalue => {
             const upvalue = obj.asUpvalue();
-            vm.allocator.destroy(upvalue);
+            // vm.allocator.destroy(upvalue);
+            vm.obj_upvalue_pool.destroy(upvalue);
         },
     }
 }
@@ -391,6 +401,25 @@ pub fn newBoundMethod(vm: *VM, receiver: Value, method: *ObjClosure) ?*ObjBoundM
     bound.method = method;
 
     return bound;
+}
+
+// ===============================
+// 对象池
+// ===============================
+
+fn fetchObjectInPool(vm: *VM, comptime obj_type: ObjType) ?*obj_type.toType() {
+    // const unknow = vm.allocator.create(obj_type.toType()) catch return null;
+
+    return switch (obj_type) {
+        .obj_class => vm.obj_class_pool.create() catch null,
+        .obj_instance => vm.obj_instance_pool.create() catch null,
+        .obj_bound_method => vm.obj_bound_method_pool.create() catch null,
+        .obj_closure => vm.obj_closure_pool.create() catch null,
+        .obj_function => vm.obj_function_pool.create() catch null,
+        .obj_native => vm.obj_native_pool.create() catch null,
+        .obj_string => vm.obj_string_pool.create() catch null,
+        .obj_upvalue => vm.obj_upvalue_pool.create() catch null,
+    };
 }
 
 const std = @import("std");
