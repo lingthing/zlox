@@ -355,19 +355,9 @@ pub const Compiler = struct {
         if (can_assign and compiler.match(.token_equal)) {
             compiler.expression();
             compiler.emitByte(set_op);
-            // if (set_op == OpCode.op_set_global.u8()) {
-            //     compiler.emitShort(@as(usize, @intCast(arg)));
-            // } else {
-            //     compiler.emitByte(@as(u8, @intCast(arg)));
-            // }
             compiler.emitShort(@as(usize, @intCast(arg)));
         } else {
             compiler.emitByte(get_op);
-            // if (set_op == OpCode.op_get_global.u8()) {
-            //     compiler.emitShort(@as(usize, @intCast(arg)));
-            // } else {
-            //     compiler.emitByte(@as(u8, @intCast(arg)));
-            // }
             compiler.emitShort(@as(usize, @intCast(arg)));
         }
     }
