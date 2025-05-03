@@ -1,20 +1,20 @@
 const std = @import("std");
-const zloc = @import("zloc.zig");
-const Chunk = zloc.Chunk;
-const Value = zloc.Value;
-const OpCode = zloc.OpCode;
-const Compiler = zloc.Compiler;
-const Obj = zloc.Obj;
-const ObjString = zloc.ObjString;
-const ObjFunction = zloc.ObjFunction;
-const ObjNative = zloc.ObjNative;
-const NativeFn = zloc.NativeFn;
-const ObjClosure = zloc.ObjClosure;
-const ObjClass = zloc.ObjClass;
-const ObjInstance = zloc.ObjInstance;
-const ObjBoundMethod = zloc.ObjBoundMethod;
-const ObjUpvalue = zloc.ObjUpvalue;
-const Table = zloc.Table;
+const zlox = @import("zlox.zig");
+const Chunk = zlox.Chunk;
+const Value = zlox.Value;
+const OpCode = zlox.OpCode;
+const Compiler = zlox.Compiler;
+const Obj = zlox.Obj;
+const ObjString = zlox.ObjString;
+const ObjFunction = zlox.ObjFunction;
+const ObjNative = zlox.ObjNative;
+const NativeFn = zlox.NativeFn;
+const ObjClosure = zlox.ObjClosure;
+const ObjClass = zlox.ObjClass;
+const ObjInstance = zlox.ObjInstance;
+const ObjBoundMethod = zlox.ObjBoundMethod;
+const ObjUpvalue = zlox.ObjUpvalue;
+const Table = zlox.Table;
 const MemoryManager = @import("memory.zig").MemoryManager;
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
@@ -109,7 +109,7 @@ fn chrNative(vm: *VM, args: []Value) Value {
     var buf: [1]u8 = undefined;
     buf[0] = @as(u8, @intFromFloat(args[0].asNumber()));
 
-    return Value.initObj(zloc.copyString(vm, &buf).?);
+    return Value.initObj(zlox.copyString(vm, &buf).?);
 }
 
 fn printErrorNative(vm: *VM, args: []Value) Value {
@@ -178,7 +178,7 @@ pub const VM = struct {
         vm.gray_stack = std.ArrayList(*Obj).init(gpa);
 
         vm.init_string = null;
-        vm.init_string = zloc.copyString(vm, "init").?;
+        vm.init_string = zlox.copyString(vm, "init").?;
 
         vm.defineNative("clock", clockNative);
         vm.defineNative("exit", exitNative);
@@ -231,7 +231,7 @@ pub const VM = struct {
         var it = vm.objects;
         while (it) |object| {
             const next = object.next;
-            zloc.freeObject(vm, object);
+            zlox.freeObject(vm, object);
             it = next;
         }
 
@@ -245,7 +245,7 @@ pub const VM = struct {
 
         vm.resetStack();
         vm.push(Value.initObj(function));
-        const closure = zloc.newClosure(vm, function).?;
+        const closure = zlox.newClosure(vm, function).?;
         _ = vm.pop();
         vm.push(Value.initObj(closure));
         _ = vm.call(closure, 0);
@@ -284,8 +284,8 @@ pub const VM = struct {
     }
 
     fn defineNative(vm: *VM, name: []const u8, function: NativeFn) void {
-        vm.push(Value.initObj(zloc.copyString(vm, name).?));
-        vm.push(Value.initObj(zloc.newNative(vm, function).?));
+        vm.push(Value.initObj(zlox.copyString(vm, name).?));
+        vm.push(Value.initObj(zlox.newNative(vm, function).?));
         _ = vm.globals.set(vm.stack[0].asString(), vm.stack[1]);
         _ = vm.pop();
         _ = vm.pop();
@@ -315,7 +315,7 @@ pub const VM = struct {
             switch (callee.objType()) {
                 .obj_class => {
                     const class = callee.asClass();
-                    (vm.stack_top - arg_count - 1)[0] = Value.initObj(zloc.newInstance(vm, class).?);
+                    (vm.stack_top - arg_count - 1)[0] = Value.initObj(zlox.newInstance(vm, class).?);
 
                     if (vm.init_string) |init_string| {
                         var initializer: Value = undefined;
@@ -391,7 +391,7 @@ pub const VM = struct {
             return upvalue.?;
         }
 
-        const createdUpvalue = zloc.newUpvalue(vm, local).?;
+        const createdUpvalue = zlox.newUpvalue(vm, local).?;
         createdUpvalue.next = upvalue;
         if (prev_upvalue == null) {
             vm.open_upvalues = createdUpvalue;
@@ -428,7 +428,7 @@ pub const VM = struct {
             return false;
         }
 
-        const bound = zloc.newBoundMethod(vm, vm.peek(0), method.asClosure()).?;
+        const bound = zlox.newBoundMethod(vm, vm.peek(0), method.asClosure()).?;
         _ = vm.pop();
         vm.push(Value.initObj(bound));
 
@@ -475,7 +475,7 @@ pub const VM = struct {
                 var slot = vm.stack.ptr;
                 while (slot != vm.stack_top) : (slot += 1) {
                     stdout.print("[ ", .{}) catch unreachable;
-                    zloc.printValue(slot[0]);
+                    zlox.printValue(slot[0]);
                     stdout.print(" ]", .{}) catch unreachable;
                 }
                 stdout.print("\n", .{}) catch unreachable;
@@ -626,7 +626,7 @@ pub const VM = struct {
 
                         _ = vm.pop(); // pop b
                         _ = vm.pop(); // pop a
-                        vm.push(Value.initObj(zloc.takeString(vm, chars).?));
+                        vm.push(Value.initObj(zlox.takeString(vm, chars).?));
                     } else if (vm.peek(0).isNumber() and vm.peek(1).isNumber()) {
                         const b = vm.pop().asNumber();
                         const a = vm.pop().asNumber();
@@ -683,7 +683,7 @@ pub const VM = struct {
                     // ptr.* = -ptr.*;
                 },
                 .op_print => {
-                    zloc.printValue(vm.pop());
+                    zlox.printValue(vm.pop());
                     stdout.print("\n", .{}) catch unreachable;
                 },
                 .op_jump => {
@@ -727,7 +727,7 @@ pub const VM = struct {
                 },
                 .op_closure => {
                     const function = frame.readConstant().asFunction();
-                    const closure = zloc.newClosure(vm, function).?;
+                    const closure = zlox.newClosure(vm, function).?;
                     vm.push(Value.initObj(closure));
                     for (0..closure.upvalue_count) |i| {
                         const is_local = frame.readByte() == 1;
@@ -759,7 +759,7 @@ pub const VM = struct {
                 },
                 .op_class => {
                     const name = frame.readString();
-                    vm.push(Value.initObj(zloc.newClass(vm, name).?));
+                    vm.push(Value.initObj(zlox.newClass(vm, name).?));
                 },
                 .op_inherit => {
                     const superclass = vm.peek(1);

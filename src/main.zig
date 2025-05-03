@@ -3,10 +3,10 @@ const fs = std.fs;
 const mem = std.mem;
 const version = @import("version.zig");
 const debug = @import("debug.zig");
-const zloc = @import("zloc.zig");
-const Chunk = zloc.Chunk;
-const OpCode = zloc.OpCode;
-const VM = zloc.VM;
+const zlox = @import("zlox.zig");
+const Chunk = zlox.Chunk;
+const OpCode = zlox.OpCode;
+const VM = zlox.VM;
 const gpa = @import("common_allocator.zig").gpa;
 
 fn repl() void {

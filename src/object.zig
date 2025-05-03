@@ -412,10 +412,10 @@ fn fetchObjectInPool(vm: *VM, comptime obj_type: ObjType) ?*obj_type.toType() {
 }
 
 const std = @import("std");
-const zloc = @import("zloc.zig");
+const zlox = @import("zlox.zig");
 const debug = @import("debug.zig");
 const utils = @import("utils.zig");
-const Value = zloc.Value;
-const Chunk = zloc.Chunk;
-const VM = zloc.VM;
-const Table = zloc.Table;
+const Value = zlox.Value;
+const Chunk = zlox.Chunk;
+const VM = zlox.VM;
+const Table = zlox.Table;

@@ -163,13 +163,13 @@ pub const Value = struct {
 };
 
 const std = @import("std");
-const zloc = @import("zloc.zig");
-const ObjType = zloc.ObjType;
-const Obj = zloc.Obj;
-const ObjString = zloc.ObjString;
-const ObjFunction = zloc.ObjFunction;
-const ObjNative = zloc.ObjNative;
-const ObjClosure = zloc.ObjClosure;
-const ObjClass = zloc.ObjClass;
-const ObjInstance = zloc.ObjInstance;
-const ObjBoundMethod = zloc.ObjBoundMethod;
+const zlox = @import("zlox.zig");
+const ObjType = zlox.ObjType;
+const Obj = zlox.Obj;
+const ObjString = zlox.ObjString;
+const ObjFunction = zlox.ObjFunction;
+const ObjNative = zlox.ObjNative;
+const ObjClosure = zlox.ObjClosure;
+const ObjClass = zlox.ObjClass;
+const ObjInstance = zlox.ObjInstance;
+const ObjBoundMethod = zlox.ObjBoundMethod;

@@ -1,11 +1,11 @@
 const std = @import("std");
-const zloc = @import("zloc.zig");
+const zlox = @import("zlox.zig");
 const debug = @import("debug.zig");
-const VM = zloc.VM;
-const Value = zloc.Value;
-const Obj = zloc.Obj;
-const Table = zloc.Table;
-const Compiler = zloc.Compiler;
+const VM = zlox.VM;
+const Value = zlox.Value;
+const Obj = zlox.Obj;
+const Table = zlox.Table;
+const Compiler = zlox.Compiler;
 
 const GC_HEAP_GROW_FACTOR = 2;
 
@@ -78,7 +78,7 @@ fn markObject(vm: *VM, object_or_null: ?*Obj) void {
             object.type.toString(),
             @intFromPtr(object),
         });
-        zloc.printValue(Value.initObj(object));
+        zlox.printValue(Value.initObj(object));
         std.debug.print("\n", .{});
     }
 
@@ -103,7 +103,7 @@ fn markCompilerRoots(vm: *VM) void {
     }
 }
 
-fn markArray(vm: *VM, array: *zloc.ValueArray) void {
+fn markArray(vm: *VM, array: *zlox.ValueArray) void {
     for (array.items) |value| {
         markValue(vm, value);
     }
@@ -133,7 +133,7 @@ fn blackenObject(vm: *VM, object: *Obj) void {
             object.type.toString(),
             @intFromPtr(object),
         });
-        zloc.printValue(Value.initObj(object));
+        zlox.printValue(Value.initObj(object));
         std.debug.print("\n", .{});
     }
 
@@ -196,7 +196,7 @@ fn sweep(vm: *VM) void {
                 vm.objects = it;
             }
 
-            zloc.freeObject(vm, unreached);
+            zlox.freeObject(vm, unreached);
         }
     }
 }

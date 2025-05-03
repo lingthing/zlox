@@ -1,8 +1,8 @@
 const builtin = @import("builtin");
 const utils = @import("utils.zig");
-const zloc = @import("zloc.zig");
-const Chunk = zloc.Chunk;
-const OpCode = zloc.OpCode;
+const zlox = @import("zlox.zig");
+const Chunk = zlox.Chunk;
+const OpCode = zlox.OpCode;
 
 pub const DEBUG_PRINT_CODE = true and builtin.mode == .Debug;
 pub const DEBUG_TRACE_EXECUTION = false and builtin.mode == .Debug;
@@ -107,7 +107,7 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const stdout = utils.getStdoutWriter();
     const constant: u16 = @as(u16, @as(u16, chunk.getByte(offset + 1)) << 8 | chunk.getByte(offset + 2));
     stdout.print("{s:<16} {d:>4} '", .{ name, constant }) catch unreachable;
-    zloc.printValue(chunk.constants.items[constant]);
+    zlox.printValue(chunk.constants.items[constant]);
     stdout.print("'\n", .{}) catch unreachable;
 
     return offset + 3;
@@ -117,7 +117,7 @@ fn closureInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const stdout = utils.getStdoutWriter();
     const constant = @as(u16, @as(u16, chunk.getByte(offset + 1)) << 8 | chunk.getByte(offset + 2));
     stdout.print("{s:<16} {d:>4} ", .{ name, constant }) catch unreachable;
-    zloc.printValue(chunk.constants.items[constant]);
+    zlox.printValue(chunk.constants.items[constant]);
     stdout.print("\n", .{}) catch unreachable;
 
     const function = chunk.getConstant(constant).asFunction();
@@ -170,7 +170,7 @@ fn invokeInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant = @as(u16, @as(u16, chunk.getByte(offset + 1)) << 8 | chunk.getByte(offset + 2));
     const arg_count = chunk.getByte(offset + 3);
     stdout.print("{s:<16} ({d} args) {d:>4} '", .{ name, arg_count, constant }) catch unreachable;
-    zloc.printValue(chunk.getConstant(constant));
+    zlox.printValue(chunk.getConstant(constant));
     stdout.print("'\n", .{}) catch unreachable;
 
     return offset + 4;

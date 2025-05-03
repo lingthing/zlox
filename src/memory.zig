@@ -1,7 +1,7 @@
 const std = @import("std");
-const zloc = @import("zloc.zig");
+const zlox = @import("zlox.zig");
 const debug = @import("debug.zig");
-const VM = zloc.VM;
+const VM = zlox.VM;
 
 pub const MemoryManager = struct {
     vm: *VM,
@@ -33,11 +33,11 @@ pub const MemoryManager = struct {
     fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const mm: *MemoryManager = @ptrCast(@alignCast(ctx));
         if (debug.DEBUG_STRESS_GC) {
-            zloc.collectGarbage(mm.vm);
+            zlox.collectGarbage(mm.vm);
         }
 
         if (mm.vm.bytes_allocated > mm.vm.next_gc) {
-            zloc.collectGarbage(mm.vm);
+            zlox.collectGarbage(mm.vm);
         }
 
         mm.vm.bytes_allocated += len;

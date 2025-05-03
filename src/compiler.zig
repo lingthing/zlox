@@ -1,15 +1,15 @@
 const std = @import("std");
 const utils = @import("utils.zig");
 const debug = @import("debug.zig");
-const zloc = @import("zloc.zig");
-const VM = zloc.VM;
-const Scanner = zloc.Scanner;
-const Token = zloc.Token;
-const TokenType = zloc.TokenType;
-const Chunk = zloc.Chunk;
-const OpCode = zloc.OpCode;
-const Value = zloc.Value;
-const ObjFunction = zloc.ObjFunction;
+const zlox = @import("zlox.zig");
+const VM = zlox.VM;
+const Scanner = zlox.Scanner;
+const Token = zlox.Token;
+const TokenType = zlox.TokenType;
+const Chunk = zlox.Chunk;
+const OpCode = zlox.OpCode;
+const Value = zlox.Value;
+const ObjFunction = zlox.ObjFunction;
 
 pub const Compiler = struct {
     var scanner: Scanner = undefined;
@@ -39,7 +39,7 @@ pub const Compiler = struct {
             .enclosing = enclosing,
             .vm = vm,
 
-            .function = zloc.newFunction(vm).?,
+            .function = zlox.newFunction(vm).?,
             .type = function_type,
 
             .locals = undefined,
@@ -51,7 +51,7 @@ pub const Compiler = struct {
         current = &compiler;
 
         if (function_type != .type_script) {
-            compiler.function.name = zloc.copyString(
+            compiler.function.name = zlox.copyString(
                 vm,
                 parser.previous.start[0..parser.previous.length],
             );
@@ -325,7 +325,7 @@ pub const Compiler = struct {
 
     fn string(compiler: *Compiler, can_assign: bool) void {
         _ = can_assign;
-        const value = zloc.copyString(
+        const value = zlox.copyString(
             compiler.vm,
             parser.previous.start[1 .. parser.previous.length - 1],
         );
@@ -435,7 +435,7 @@ pub const Compiler = struct {
     }
 
     fn identifierConstant(compiler: *Compiler, name: *Token) usize {
-        const value = zloc.copyString(compiler.vm, name.start[0..name.length]);
+        const value = zlox.copyString(compiler.vm, name.start[0..name.length]);
 
         return compiler.makeConstant(Value.initObj(value.?));
     }

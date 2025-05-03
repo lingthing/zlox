@@ -5,7 +5,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "name": "(Windows) Debug test runner|cppvsdbg",
-            "program": "${workspaceFolder}\\zig-out\\bin\\zloc.exe",
+            "program": "${workspaceFolder}\\zig-out\\bin\\zlox.exe",
             "cwd": "${workspaceFolder}\\zig-out\\bin",
             "symbolSearchPath": "${workspaceFolder}\\zig-out\\bin",
 

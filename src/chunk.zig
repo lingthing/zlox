@@ -1,19 +1,19 @@
 const std = @import("std");
-const zloc = @import("zloc.zig");
-const OpCode = zloc.OpCode;
-const Value = zloc.Value;
-const VM = zloc.VM;
+const zlox = @import("zlox.zig");
+const OpCode = zlox.OpCode;
+const Value = zlox.Value;
+const VM = zlox.VM;
 
 pub const Chunk = struct {
     code: std.ArrayList(u8),
     lines: std.ArrayList(u32),
-    constants: zloc.ValueArray,
+    constants: zlox.ValueArray,
 
     pub fn init(allocator: std.mem.Allocator) Chunk {
         return .{
             .code = std.ArrayList(u8).init(allocator),
             .lines = std.ArrayList(u32).init(allocator),
-            .constants = zloc.ValueArray.init(allocator),
+            .constants = zlox.ValueArray.init(allocator),
         };
     }
 

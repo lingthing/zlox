@@ -1,5 +1,5 @@
 pub const VERSION = blk: {
-    const res = std.fmt.comptimePrint("zloc {d}.{d}.{d}", .{ VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH });
+    const res = std.fmt.comptimePrint("zlox {d}.{d}.{d}", .{ VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH });
 
     break :blk res;
 };

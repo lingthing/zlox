@@ -152,6 +152,6 @@ pub const Table = struct {
 };
 
 const std = @import("std");
-const zloc = @import("zloc.zig");
-const ObjString = zloc.ObjString;
-const Value = zloc.Value;
+const zlox = @import("zlox.zig");
+const ObjString = zlox.ObjString;
+const Value = zlox.Value;
