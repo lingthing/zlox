@@ -36,13 +36,13 @@ pub const Value = struct {
 
     pub fn initObj(value: anytype) Value {
         const typeInfo = @typeInfo(@TypeOf(value));
-        if (typeInfo != .Pointer) {
+        if (typeInfo != .pointer) {
             @compileError("Value.initObj() expects a pointer");
         }
-        if (typeInfo.Pointer.size != .One) {
+        if (typeInfo.pointer.size != .one) {
             @compileError("Value.initObj() only supports a one pointer");
         }
-        if (@typeInfo(typeInfo.Pointer.child).Struct.fields[0].type != Obj and
+        if (@typeInfo(typeInfo.pointer.child).@"struct".fields[0].type != Obj and
             @TypeOf(value) != *Obj)
         {
             @compileError("Value.initObj() expects a pointer to struct with Obj as first field or a pointer to Obj");

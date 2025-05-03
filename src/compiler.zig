@@ -980,7 +980,7 @@ const FunctionType = enum {
 };
 
 const rules = blk: {
-    var tmp: [@typeInfo(TokenType).Enum.fields.len]ParseRule = undefined;
+    var tmp: [@typeInfo(TokenType).@"enum".fields.len]ParseRule = undefined;
     tmp[TokenType.token_left_paren.u8()] = .{
         .prefix = Compiler.grouping,
         .infix = Compiler.call,

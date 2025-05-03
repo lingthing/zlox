@@ -110,7 +110,7 @@ fn markArray(vm: *VM, array: *zloc.ValueArray) void {
 }
 
 fn traceReferences(vm: *VM) void {
-    while (vm.gray_stack.popOrNull()) |object| {
+    while (vm.gray_stack.pop()) |object| {
         blackenObject(vm, object);
     }
 }

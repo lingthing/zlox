@@ -24,12 +24,13 @@ pub const MemoryManager = struct {
             .vtable = &.{
                 .alloc = alloc,
                 .resize = resize,
+                .remap = remap,
                 .free = free,
             },
         };
     }
 
-    fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const mm: *MemoryManager = @ptrCast(@alignCast(ctx));
         if (debug.DEBUG_STRESS_GC) {
             zloc.collectGarbage(mm.vm);
@@ -41,26 +42,40 @@ pub const MemoryManager = struct {
 
         mm.vm.bytes_allocated += len;
 
-        return mm.child_allocator.rawAlloc(len, ptr_align, ret_addr);
+        return mm.child_allocator.rawAlloc(len, alignment, ret_addr);
     }
 
-    fn resize(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+    fn resize(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
         const mm: *MemoryManager = @ptrCast(@alignCast(ctx));
 
-        if (buf.len <= new_len) {
-            mm.vm.bytes_allocated += new_len - buf.len;
+        if (memory.len <= new_len) {
+            mm.vm.bytes_allocated += new_len - memory.len;
         } else {
-            mm.vm.bytes_allocated -= buf.len - new_len;
+            mm.vm.bytes_allocated -= memory.len - new_len;
         }
 
-        return mm.child_allocator.rawResize(buf, buf_align, new_len, ret_addr);
+        return mm.child_allocator.rawResize(memory, alignment, new_len, ret_addr);
     }
 
-    fn free(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+    fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
         const mm: *MemoryManager = @ptrCast(@alignCast(ctx));
 
-        mm.vm.bytes_allocated -= buf.len;
+        // TODO: This is a hack to get around the fact that remap is not implemented
+        // TODO: I haven't studied remapes.it's probably going to be a problem, but it's going to be updated until 0.14
+        if (memory.len <= new_len) {
+            mm.vm.bytes_allocated += new_len - memory.len;
+        } else {
+            mm.vm.bytes_allocated -= memory.len - new_len;
+        }
 
-        return mm.child_allocator.rawFree(buf, buf_align, ret_addr);
+        return mm.child_allocator.rawRemap(memory, alignment, new_len, ret_addr);
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const mm: *MemoryManager = @ptrCast(@alignCast(ctx));
+
+        mm.vm.bytes_allocated -= memory.len;
+
+        return mm.child_allocator.rawFree(memory, alignment, ret_addr);
     }
 };

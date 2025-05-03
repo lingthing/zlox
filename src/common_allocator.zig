@@ -1,6 +1,6 @@
 const std = @import("std");
 
-var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa_instance = std.heap.DebugAllocator(.{}).init;
 pub const gpa = gpa_instance.allocator();
 var once_deinit = std.once(struct {
     fn deinit() void {
